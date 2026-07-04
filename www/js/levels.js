@@ -679,12 +679,16 @@ class TrackBuilder {
   }
 
   patHurdle() {
-    // energy fence across the safe zone: too tall for a tap -> HELD jump
+    // energy fence across the safe zone: too tall for a tap -> HELD jump.
+    // The landing zone must cover the full hold-jump arc: at top speed a
+    // held jump flies holdG rows, so anything shorter can strand the arc
+    // in whatever pattern comes next.
     for (let i = 0; i < 3; i++) this.rows.push(this.decoratedRow(this.safeSet(this.path, 3)));
     this.rows.push(this.decoratedRow(this.safeSet(this.path, 3), { pathChar: CELL.HURDLE }));
-    for (let i = 0; i < 3; i++) this.rows.push(this.decoratedRow(this.safeSet(this.path, 3)));
+    const landing = Math.max(3, this.holdG + 1);
+    for (let i = 0; i < landing; i++) this.rows.push(this.decoratedRow(this.safeSet(this.path, 3)));
     if (this.difficulty > 0.5 && this.rng() < 0.5) {
-      // hold-then-tap rhythm: a low block right after the fence
+      // hold-then-tap rhythm: a low block after the landing zone
       this.rows.push(this.decoratedRow(this.safeSet(this.path, 3), { pathChar: CELL.LOW }));
       for (let i = 0; i < 3; i++) this.rows.push(this.decoratedRow(this.safeSet(this.path, 3)));
     }
@@ -785,7 +789,9 @@ class TrackBuilder {
       if (i % 2 === 0) g[this.path + L] = CELL.COIN_AIR;
       this.rows.push(g);
     }
-    for (let i = 0; i < 4; i++) this.rows.push(this.decoratedRow(this.safeSet(this.path, 3)));
+    // pad flights span holdG+2 rows from the pad — land anywhere in that arc
+    const landing = Math.max(4, this.holdG + 3 - gap);
+    for (let i = 0; i < landing; i++) this.rows.push(this.decoratedRow(this.safeSet(this.path, 3)));
   }
 
   patDestructibleWall() {
@@ -862,8 +868,8 @@ function generateLevel(index) {
   const rng = mulberry32(0xA11CE + index * 7919);
   const speed = levelSpeed(index);
   const difficulty = Math.min(1, (index - 9) / 240); // 0 at lvl 10, 1 at ~lvl 250
-  // levels grow with progress: ~320 rows at level 11 -> ~1000 rows from level ~310 on
-  const targetRows = Math.round(320 + 680 * Math.min(1, (index - 9) / 300));
+  // long-haul runs: ~1280 rows at level 11 -> ~4000 rows from level ~310 on
+  const targetRows = Math.round(1280 + 2720 * Math.min(1, (index - 9) / 300));
 
   const tb = new TrackBuilder(rng, difficulty, tapGap(speed), holdGap(speed));
   tb.open(8);
@@ -883,7 +889,7 @@ export function getDailyLevel(dayKey) {
   const speed = 8 + difficulty * 3;
   const tb = new TrackBuilder(rng, difficulty, tapGap(speed), holdGap(speed));
   tb.open(8);
-  const targetRows = 420 + Math.floor(rng() * 120);
+  const targetRows = 1680 + Math.floor(rng() * 480);
   while (tb.rows.length < targetRows) tb.emitOne();
   tb.close(6);
   const rows = tb.takeRows();
@@ -943,10 +949,18 @@ export function createEndlessTrack(seed) {
 // ---------------------------------------------------------------------------
 const cache = new Map();
 
+// Handcrafted levels repeat their own body 4x for a full-length run. Every
+// handcrafted level opens with >=8 rows of full floor and closes with a full
+// straight, so the seams are always safe (and the solver re-proves them all).
+function quadruple(rows) {
+  const body = rows.slice(8);
+  return rows.concat(body, body, body);
+}
+
 export function getLevel(index) {
   // index: 0-based
   if (cache.has(index)) return cache.get(index);
-  const rows = index < 10 ? HANDCRAFTED[index]() : generateLevel(index);
+  const rows = index < 10 ? quadruple(HANDCRAFTED[index]()) : generateLevel(index);
   const level = {
     index,
     name: `Level ${index + 1}`,
