@@ -4,10 +4,12 @@
 // strings (lane -3 .. lane +3), row 0 being the start line. Cell characters
 // are defined in config.js (CELL).
 //
-// Levels 1-10 are handcrafted with the builder DSL below. Levels 11-100 are
-// produced by a deterministic seeded generator that carves a guaranteed
-// playable path first and decorates around it; every level additionally
-// passes the reachability solver in `validateLevel` (see tools/validate-levels.mjs).
+// Every level is a three-act journey: three distinct original-length track
+// designs stitched back to back (each act opens and closes on full floor, so
+// the seams are always safe). Levels 1-10 use a handcrafted design as act one
+// plus two gentle generated acts; levels 11+ stitch three differently-seeded
+// generated designs with difficulty rising act by act. Every level passes the
+// reachability solver in `validateLevel` (see tools/validate-levels.mjs).
 
 import { CELL, TRACK_LANES, PHYSICS, LANE_MIN, LANE_MAX, ENDLESS } from './config.js';
 
@@ -590,10 +592,11 @@ export function maxJumpGap(speed) { return holdGap(speed); }
 // rng() call order here changes every generated level.
 // ---------------------------------------------------------------------------
 class TrackBuilder {
-  constructor(rng, difficulty, tapG, holdG) {
+  constructor(rng, difficulty, tapG, holdG, easy = false) {
     this.rng = rng;
     this.tapG = tapG;   // rows a tap jump safely clears
     this.holdG = holdG; // rows a held jump safely clears
+    this.easy = easy;   // tutorial acts: steering + tap jumps only
     this.rows = [];
     this.path = 0; // current guaranteed-safe lane
     this.setDifficulty(difficulty);
@@ -659,7 +662,7 @@ class TrackBuilder {
   patGap() {
     // narrow gaps are tap-able; wide gaps (more common as difficulty rises)
     // demand a HELD jump — and often carry a ring at the top of the arc
-    const wide = this.rng() < 0.25 + 0.45 * this.difficulty;
+    const wide = this.rng() < 0.25 + 0.45 * this.difficulty && !this.easy;
     const lo = wide ? this.tapG + 1 : 2;
     const hi = wide ? this.holdG : Math.max(2, this.tapG);
     const gap = Math.min(this.holdG, lo + Math.floor(this.rng() * Math.max(1, hi - lo + 1)));
@@ -829,23 +832,28 @@ class TrackBuilder {
 
   // weighted pattern table; harder patterns gain weight with difficulty.
   // ORDER AND WEIGHTS ARE PART OF THE CAMPAIGN'S PINNED OUTPUT — do not reorder.
+  // Easy acts (early tutorial levels) only draw from the gentle patterns:
+  // steering, narrow gaps and tap-jumps — no held-jump mechanics yet.
   patternTable() {
-    return [
+    const gentle = [
       [() => this.patStraight(6), 1.0],
       [() => this.patMeander(8), 1.2],
       [() => this.patGap(), 1.0 + this.difficulty],
       [() => this.patNarrowBridge(), 0.6 + this.difficulty],
       [() => this.patLowBlockJump(), 0.8 + this.difficulty * 0.7],
       [() => this.patSlalom(), 0.7 + this.difficulty * 0.8],
-      [() => this.patHazardCorridor(), 0.4 + this.difficulty],
       [() => this.patBoost(), 0.5],
+      [() => this.patCoinRun(), 0.7],
+    ];
+    if (this.easy) return gentle;
+    return gentle.concat([
+      [() => this.patHazardCorridor(), 0.4 + this.difficulty],
       [() => this.patBouncePad(), 0.5 + this.difficulty * 0.4],
       [() => this.patDestructibleWall(), 0.5 + this.difficulty * 0.6],
-      [() => this.patCoinRun(), 0.7],
       [() => this.patHurdle(), 0.4 + this.difficulty * 0.9],
       [() => this.patDebris(), 0.3 + this.difficulty * 0.9],
       [() => this.patRingJump(), 0.3 + this.difficulty * 0.6],
-    ];
+    ]);
   }
 
   emitOne() {
@@ -862,20 +870,49 @@ class TrackBuilder {
 }
 
 // ---------------------------------------------------------------------------
-// Campaign generator for levels 11-100 (pinned output — see TrackBuilder note).
+// Campaign generator (pinned output — see TrackBuilder note).
+//
+// One "act" is a self-contained original-length track design: full-floor
+// opening, patterns, full-floor close. A level stitches three acts with
+// DIFFERENT seeds — three distinct designs back to back — with difficulty
+// nudged upward each act so the run escalates like a three-part journey.
 // ---------------------------------------------------------------------------
-function generateLevel(index) {
-  const rng = mulberry32(0xA11CE + index * 7919);
-  const speed = levelSpeed(index);
-  const difficulty = Math.min(1, (index - 9) / 240); // 0 at lvl 10, 1 at ~lvl 250
-  // long-haul runs: ~1280 rows at level 11 -> ~4000 rows from level ~310 on
-  const targetRows = Math.round(1280 + 2720 * Math.min(1, (index - 9) / 300));
-
-  const tb = new TrackBuilder(rng, difficulty, tapGap(speed), holdGap(speed));
+function generateAct(seed, difficulty, speed, targetRows, easy = false) {
+  const rng = mulberry32(seed >>> 0);
+  const tb = new TrackBuilder(rng, difficulty, tapGap(speed), holdGap(speed), easy);
   tb.open(8);
   while (tb.rows.length < targetRows) tb.emitOne();
   tb.close(6);
   return tb.takeRows();
+}
+
+function generateLevel(index) {
+  const speed = levelSpeed(index);
+  const dBase = Math.min(1, (index - 9) / 240); // 0 at lvl 10, 1 at ~lvl 250
+  // per-act length: the original design length (~320 rows early, ~1000 late)
+  const actRows = Math.round(320 + 680 * Math.min(1, (index - 9) / 300));
+  const acts = [];
+  for (let a = 0; a < 3; a++) {
+    const seed = (0xA11CE + index * 7919 + a * 0x3779B9) >>> 0;
+    const d = Math.min(1, dBase + a * 0.07); // act II and III bite harder
+    acts.push(generateAct(seed, d, speed, actRows));
+  }
+  return acts[0].concat(acts[1], acts[2]);
+}
+
+// Handcrafted levels: the authored design is act one; two gentle generated
+// acts follow. The first few levels only draw from tutorial-safe patterns.
+function handcraftedLevel(index) {
+  const speed = levelSpeed(index);
+  const easy = index < 5; // held-jump/hurdle/debris mechanics arrive from L6 acts
+  const actRows = 180 + index * 15;
+  const acts = [HANDCRAFTED[index]()];
+  for (let a = 0; a < 2; a++) {
+    const seed = (0xC4AF7 + index * 7919 + a * 0x3779B9) >>> 0;
+    const d = Math.min(0.35, 0.04 + index * 0.03 + a * 0.05);
+    acts.push(generateAct(seed, d, speed, actRows, easy));
+  }
+  return acts[0].concat(acts[1], acts[2]);
 }
 
 // ---------------------------------------------------------------------------
@@ -889,8 +926,13 @@ export function getDailyLevel(dayKey) {
   const speed = 8 + difficulty * 3;
   const tb = new TrackBuilder(rng, difficulty, tapGap(speed), holdGap(speed));
   tb.open(8);
-  const targetRows = 1680 + Math.floor(rng() * 480);
-  while (tb.rows.length < targetRows) tb.emitOne();
+  // three acts of original design length, each act a notch harder
+  for (let act = 0; act < 3; act++) {
+    tb.setDifficulty(Math.min(1, difficulty + act * 0.12));
+    const target = tb.rows.length + 420 + Math.floor(rng() * 120);
+    while (tb.rows.length < target) tb.emitOne();
+    if (act < 2) tb.open(10); // full-floor breather between acts
+  }
   tb.close(6);
   const rows = tb.takeRows();
   return {
@@ -949,18 +991,10 @@ export function createEndlessTrack(seed) {
 // ---------------------------------------------------------------------------
 const cache = new Map();
 
-// Handcrafted levels repeat their own body 4x for a full-length run. Every
-// handcrafted level opens with >=8 rows of full floor and closes with a full
-// straight, so the seams are always safe (and the solver re-proves them all).
-function quadruple(rows) {
-  const body = rows.slice(8);
-  return rows.concat(body, body, body);
-}
-
 export function getLevel(index) {
   // index: 0-based
   if (cache.has(index)) return cache.get(index);
-  const rows = index < 10 ? quadruple(HANDCRAFTED[index]()) : generateLevel(index);
+  const rows = index < 10 ? handcraftedLevel(index) : generateLevel(index);
   const level = {
     index,
     name: `Level ${index + 1}`,
