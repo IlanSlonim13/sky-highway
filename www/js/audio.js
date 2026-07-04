@@ -84,6 +84,11 @@ export const sfx = {
   boost() { tone({ type: 'sawtooth', from: 200, to: 900, dur: 0.3, peak: 0.4 }); },
   pad() { tone({ type: 'sine', from: 330, to: 660, dur: 0.2, peak: 0.45 }); },
   slowmo() { tone({ type: 'sine', from: 700, to: 180, dur: 0.5, peak: 0.4 }); },
+  cometWarn() {
+    // two-tone incoming alarm
+    tone({ type: 'square', from: 980, to: 740, dur: 0.09, peak: 0.22 });
+    tone({ type: 'square', from: 980, to: 740, dur: 0.09, peak: 0.22, delay: 0.14 });
+  },
   flowUp(tier = 2) {
     // rising two-note blip, pitched by flow tier
     const base = 300 + tier * 110;
@@ -104,51 +109,126 @@ export const sfx = {
 };
 
 // ---------------------------------------------------------------------------
-// Music — a simple 2-bar synthwave loop scheduled with a lookahead timer.
+// Music — an 8-bit chiptune sequencer with two songs:
+//   'level' — "Hyperlane": 152 BPM driving square lead, pumping bass,
+//             16th-note arps, noise drums. Thrilling.
+//   'menu'  — "Docking Bay": mellow triangle arps over soft chords.
+// Patterns are 16-step bars; MIDI note numbers, 0 = rest.
 // ---------------------------------------------------------------------------
-const BPM = 112;
-const BEAT = 60 / BPM;
-// bassline (semitones relative to A1 = 55Hz), one note per 8th
-const BASS = [0, 0, 12, 0, 3, 3, 15, 3, 5, 5, 17, 5, 3, 3, 15, 3];
-const CHORDS = [[0, 3, 7], [3, 7, 10], [5, 8, 12], [3, 7, 10]]; // per bar-half
+const midiHz = (m) => 440 * Math.pow(2, (m - 69) / 12);
 
+const SONGS = {
+  level: {
+    bpm: 152,
+    bars: 4,
+    // per bar: 8 eighth-note bass hits (root pump with octave kicks)
+    bass: [
+      [45, 45, 57, 45, 45, 57, 45, 57],   // Am
+      [41, 41, 53, 41, 41, 53, 41, 53],   // F
+      [48, 48, 60, 48, 48, 60, 48, 60],   // C
+      [43, 43, 55, 43, 43, 55, 43, 55],   // G
+    ],
+    bassType: 'square', bassGain: 0.30,
+    // per bar: 8 eighth-note lead melody notes
+    lead: [
+      [69, 72, 76, 81, 79, 76, 72, 76],
+      [65, 69, 72, 77, 76, 72, 69, 72],
+      [67, 72, 76, 79, 84, 79, 76, 72],
+      [74, 71, 67, 71, 74, 79, 77, 74],
+    ],
+    leadType: 'square', leadGain: 0.16,
+    // per bar: chord tones for the 16th-note arp (played +1 octave)
+    arp: [[57, 60, 64], [53, 57, 60], [60, 64, 67], [55, 59, 62]],
+    arpType: 'square', arpGain: 0.055,
+    drums: { kick: [0, 8, 10], snare: [4, 12], hatEvery: 2 },
+  },
+  menu: {
+    bpm: 100,
+    bars: 4,
+    bass: [
+      [45, 0, 45, 0, 45, 0, 45, 0],
+      [41, 0, 41, 0, 41, 0, 41, 0],
+      [48, 0, 48, 0, 48, 0, 48, 0],
+      [43, 0, 43, 0, 43, 0, 43, 0],
+    ],
+    bassType: 'triangle', bassGain: 0.30,
+    lead: [
+      [69, 0, 72, 0, 76, 0, 72, 0],
+      [69, 0, 72, 0, 77, 0, 72, 0],
+      [67, 0, 72, 0, 76, 0, 72, 0],
+      [67, 0, 71, 0, 74, 0, 71, 0],
+    ],
+    leadType: 'triangle', leadGain: 0.14,
+    arp: [[57, 60, 64], [53, 57, 60], [60, 64, 67], [55, 59, 62]],
+    arpType: 'triangle', arpGain: 0.04,
+    drums: { kick: [0], snare: [], hatEvery: 4 },
+  },
+};
+
+let songName = 'menu';
 let nextNoteTime = 0;
 let step = 0;
 
+function chipNote(type, midi, t0, dur, peak) {
+  const osc = ctx.createOscillator();
+  const g = ctx.createGain();
+  osc.type = type;
+  osc.frequency.value = midiHz(midi);
+  env(g, t0, 0.008, dur, peak);
+  osc.connect(g); g.connect(musicGain);
+  osc.start(t0); osc.stop(t0 + dur + 0.05);
+}
+
+function chipNoise(t0, dur, filterHz, peak) {
+  const len = Math.max(1, Math.floor(ctx.sampleRate * dur));
+  const buf = ctx.createBuffer(1, len, ctx.sampleRate);
+  const ch = buf.getChannelData(0);
+  for (let i = 0; i < len; i++) ch[i] = Math.random() * 2 - 1;
+  const src = ctx.createBufferSource();
+  src.buffer = buf;
+  const filt = ctx.createBiquadFilter();
+  filt.type = 'highpass';
+  filt.frequency.value = filterHz;
+  const g = ctx.createGain();
+  env(g, t0, 0.003, dur, peak);
+  src.connect(filt); filt.connect(g); g.connect(musicGain);
+  src.start(t0); src.stop(t0 + dur + 0.02);
+}
+
 function scheduleMusic() {
   if (!ctx || !musicGain) return;
-  while (nextNoteTime < ctx.currentTime + 0.25) {
+  const song = SONGS[songName];
+  const step16 = 60 / song.bpm / 4;
+  while (nextNoteTime < ctx.currentTime + 0.3) {
     const t0 = nextNoteTime;
-    const s = step % 16;
-    // bass
-    {
-      const osc = ctx.createOscillator();
-      const g = ctx.createGain();
-      osc.type = 'square';
-      osc.frequency.value = 55 * Math.pow(2, BASS[s] / 12);
-      env(g, t0, 0.01, BEAT * 0.4, 0.5);
-      osc.connect(g); g.connect(musicGain);
-      osc.start(t0); osc.stop(t0 + BEAT * 0.5);
+    const s = step % 16;                              // 16th within the bar
+    const bar = Math.floor(step / 16) % song.bars;
+
+    if (s % 2 === 0) { // eighth-note grid
+      const e = s / 2;
+      const b = song.bass[bar][e];
+      if (b) chipNote(song.bassType, b, t0, step16 * 1.6, song.bassGain);
+      const l = song.lead[bar][e];
+      if (l) chipNote(song.leadType, l, t0, step16 * 1.7, song.leadGain);
     }
-    // pad chord on beat 1 of each half-bar
-    if (s % 4 === 0) {
-      const chord = CHORDS[Math.floor(s / 4)];
-      for (const semi of chord) {
-        const osc = ctx.createOscillator();
-        const g = ctx.createGain();
-        osc.type = 'triangle';
-        osc.frequency.value = 220 * Math.pow(2, semi / 12);
-        env(g, t0, 0.06, BEAT * 1.8, 0.12);
-        osc.connect(g); g.connect(musicGain);
-        osc.start(t0); osc.stop(t0 + BEAT * 2);
-      }
-    }
-    nextNoteTime += BEAT / 2;
+    // 16th-note arpeggio, one octave up, up-down pattern
+    const chord = song.arp[bar];
+    const arpNote = chord[[0, 1, 2, 1][s % 4]] + 12;
+    chipNote(song.arpType, arpNote, t0, step16 * 0.9, song.arpGain);
+
+    // drums
+    const d = song.drums;
+    if (d.kick.includes(s)) chipNote('sine', 41, t0, 0.09, 0.5); // thump
+    if (d.snare.includes(s)) chipNoise(t0, 0.09, 1800, 0.30);
+    if (s % d.hatEvery === 0) chipNoise(t0, 0.03, 6000, 0.10);
+
+    nextNoteTime += step16;
     step++;
   }
 }
 
-export function setMusic(on) {
+export function setMusic(on, mode) {
+  if (mode && mode !== songName) { songName = mode; step = 0; }
   if (musicTimer) { clearInterval(musicTimer); musicTimer = null; }
   if (on && ctx) {
     nextNoteTime = ctx.currentTime + 0.05;

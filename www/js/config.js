@@ -128,6 +128,16 @@ export const DEBRIS = {
   crashY: 0.75,           // ship center above this inside a debris cell = crash
 };
 
+export const COMETS = {
+  startLevel: 30,         // campaign level number where comets begin
+  endlessStartM: 500,     // distance in Hyperdrive where comets begin
+  warnS: 2.6,             // seconds the target reticle shows before the strike
+  strikeS: 0.45,          // seconds of the comet streaking in
+  radius: 0.9,            // lanes: direct-hit radius at impact
+  basePeriodS: 8,         // spawn period at the start ...
+  minPeriodS: 3.5,        // ... tightening to this at max difficulty
+};
+
 export const RING = {
   y: 1.05,                // torus center height (thread it with a HELD jump)
   window: 0.4,            // |shipY - y| tolerance to count as "through"

@@ -7,7 +7,7 @@
 
 import {
   PHYSICS, SHIP, BOOST, SLOWMO, REWIND, CELL, BLOCK_HEIGHTS, WEAPON, FLOW, CAMERA,
-  DEBRIS, RING,
+  DEBRIS, RING, COMETS,
 } from './config.js';
 import { sfx } from './audio.js';
 import { EchoRecorder } from './echo.js';
@@ -45,6 +45,8 @@ export class Game {
     this.runStats = { coins: 0, airCoins: 0, barriers: 0, jumps: 0, revives: 0, slowmos: 0, maxFlow: 1, gaps: 0, nearMisses: 0, rings: 0 };
     this._holdT = 0;          // seconds the current jump has been sustained
     this._sustain = false;    // whether the current airtime responds to holding
+    this.comets = [];         // incoming comet strikes (later levels)
+    this._cometTimer = COMETS.basePeriodS * 0.8; // grace before the first one
     this._takeoffZ = null;
     this._nearMissRow = -1;
     this.trailPoints = [];
@@ -307,6 +309,32 @@ export class Game {
 
     if (s.y < PHYSICS.fallDeathY) return this._crash('fall');
 
+    // --- comet strikes (later levels): dodge the reticle before impact ---
+    if (this._cometsEnabled()) {
+      this._cometTimer -= dt;
+      if (this._cometTimer <= 0) {
+        this._cometTimer = Math.max(COMETS.minPeriodS,
+          COMETS.basePeriodS - this._cometDifficulty() * (COMETS.basePeriodS - COMETS.minPeriodS));
+        this._spawnComet();
+      }
+    }
+    for (let i = this.comets.length - 1; i >= 0; i--) {
+      const c = this.comets[i];
+      c.t += dt;
+      if (c.state === 'warn' && c.t >= COMETS.warnS) { c.state = 'strike'; c.t = 0; }
+      else if (c.state === 'strike' && c.t >= COMETS.strikeS) {
+        // impact
+        this.shake = Math.max(this.shake, 0.6);
+        this._burst(c.lane, 0.4, c.row + 0.5, '#ff8a50', 16);
+        this._burst(c.lane, 0.4, c.row + 0.5, '#ffffff', 8);
+        sfx.explode();
+        const hit = Math.abs(s.z + SHIP.noseAhead - (c.row + 0.5)) < 1.0 &&
+          Math.abs(s.x - c.lane) < COMETS.radius && s.y < 1.0;
+        this.comets.splice(i, 1);
+        if (hit) return this._crash('comet');
+      }
+    }
+
     // --- debris band & ring threading (center lane) ---
     {
       const row = Math.floor(s.z + SHIP.noseAhead);
@@ -460,6 +488,46 @@ export class Game {
   }
 
   // ------------------------------------------------------------------
+  // Comets: enabled deep into the campaign and Hyperdrive. Every strike is
+  // telegraphed by a reticle for COMETS.warnS seconds — always dodgeable.
+  _cometsEnabled() {
+    if (this.mode === 'campaign') {
+      return typeof this.level.index === 'number' && this.level.index >= COMETS.startLevel - 1;
+    }
+    if (this.mode === 'endless') return this.ship.z >= COMETS.endlessStartM;
+    return false;
+  }
+
+  _cometDifficulty() {
+    if (this.mode === 'endless') return Math.min(1, this.ship.z / 2000);
+    return Math.min(1, (this.level.index - (COMETS.startLevel - 1)) / 300);
+  }
+
+  _spawnComet(forcedLane) {
+    // land it where the ship will be when the warning runs out
+    const speed = this.currentSpeed * this.ship.speedMul;
+    const row = Math.floor(this.ship.z + speed * (COMETS.warnS + COMETS.strikeS));
+    const rowStr = this.level.rows[row];
+    if (!rowStr) return false;
+    // fairness: only target rows with room to dodge (>=3 floor-ish lanes)
+    const open = [];
+    for (let lane = -3; lane <= 3; lane++) {
+      const ch = rowStr[lane + 3];
+      if (ch === CELL.FLOOR || ch === CELL.COIN || ch === CELL.BOOST || ch === CELL.AMMO || ch === CELL.DEBRIS) open.push(lane);
+    }
+    if (open.length < 3) return false;
+    let lane = forcedLane;
+    if (lane === undefined) {
+      // aim near the ship's lane so it actually threatens
+      const near = open.filter((l) => Math.abs(l - this.ship.x) <= 2);
+      const pool = near.length ? near : open;
+      lane = pool[Math.floor(Math.random() * pool.length)];
+    }
+    this.comets.push({ row, lane, t: 0, state: 'warn' });
+    sfx.cometWarn();
+    return true;
+  }
+
   shoot() { this.input.queueFire(); }
 
   _fire() {
@@ -522,6 +590,7 @@ export class Game {
     this.shake = 1;
     this.shipVisible = false;
     this.projectiles.length = 0;
+    this.comets.length = 0;
     sfx.crash();
     const s = this.ship;
     this._burst(s.x, s.y + 0.3, s.z, '#ffffff', 10);
@@ -587,6 +656,7 @@ export class Game {
       this.runCoins = snap.runCoins;
       this.ammo = snap.ammo;
       this.time = snap.t;
+      this._cometTimer = COMETS.basePeriodS * 0.6; // grace after a revive
       this.runStats.revives++;
       // the echo recording is rewritten from here — but echoClock is NOT
       // restored: your rival echo keeps flying while you recover

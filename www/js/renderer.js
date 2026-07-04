@@ -10,7 +10,7 @@
 // only on the ship canopy and finish gate, all big soft art pre-rendered
 // into cached offscreen canvases per theme.
 
-import { CAMERA, CELL, BLOCK_HEIGHTS, TRACK_LANES, DEBRIS, RING } from './config.js';
+import { CAMERA, CELL, BLOCK_HEIGHTS, TRACK_LANES, DEBRIS, RING, COMETS } from './config.js';
 import { equippedShip, equippedTrail } from './cosmetics.js';
 
 const HAZARD_A = '#ff5030';
@@ -28,9 +28,36 @@ export class Renderer {
     this.ctx = canvas.getContext('2d');
     this.t = 0;
     this.stars = [];
-    for (let i = 0; i < 130; i++) {
+    for (let i = 0; i < 190; i++) {
       this.stars.push({ x: Math.random(), y: Math.random(), d: 0.2 + Math.random() * 0.8, tw: Math.random() * 6.28 });
     }
+    // 3D space dust surrounding the track (never over the playfield: |x| > 4.5)
+    this.dust = [];
+    for (let i = 0; i < 80; i++) {
+      const side = Math.random() < 0.5 ? -1 : 1;
+      this.dust.push({
+        x: side * (4.5 + Math.random() * 11),
+        y: -2.5 + Math.random() * 6,
+        zSeed: Math.random() * 55,
+        s: 0.5 + Math.random() * 1.4,
+        tw: Math.random() * 6.28,
+      });
+    }
+    // distant scenery drifting past: asteroids and derelict pylons
+    this.scenery = [];
+    for (let i = 0; i < 9; i++) {
+      const side = Math.random() < 0.5 ? -1 : 1;
+      this.scenery.push({
+        x: side * (7 + Math.random() * 9),
+        y: -1 + Math.random() * 4,
+        zSeed: Math.random() * 130,
+        size: 0.8 + Math.random() * 1.8,
+        kind: Math.random() < 0.65 ? 'rock' : 'pylon',
+        spin: Math.random() * 6.28,
+      });
+    }
+    this._meteor = null;       // occasional shooting star in the sky
+    this._meteorNext = 3;
     this._assets = new Map(); // themeName|WxH -> { sky, vignette }
     this.resize();
   }
@@ -77,6 +104,37 @@ export class Renderer {
       sc.fillStyle = g;
       sc.fillRect(bx * w - r, by * h - r, r * 2, r * 2);
     }
+    // galaxy band: a soft tilted streak of light across the upper sky
+    sc.save();
+    sc.translate(w * 0.5, h * 0.16);
+    sc.rotate(-0.22);
+    const band = sc.createLinearGradient(0, -h * 0.055, 0, h * 0.055);
+    band.addColorStop(0, 'transparent');
+    band.addColorStop(0.5, this._alpha(theme.star, 0.10));
+    band.addColorStop(1, 'transparent');
+    sc.fillStyle = band;
+    sc.fillRect(-w, -h * 0.055, w * 2, h * 0.11);
+    sc.restore();
+
+    // a distant planet with a lit limb and thin ring
+    const pr = Math.min(w, h) * 0.085;
+    const pcx = w * 0.80, pcy = h * 0.13;
+    const pg = sc.createRadialGradient(pcx - pr * 0.4, pcy - pr * 0.4, pr * 0.1, pcx, pcy, pr);
+    pg.addColorStop(0, this._alpha(theme.glow, 0.85));
+    pg.addColorStop(0.55, this._alpha(theme.floorAlt, 0.65));
+    pg.addColorStop(1, 'rgba(4,2,12,0.9)');
+    sc.globalCompositeOperation = 'source-over';
+    sc.fillStyle = pg;
+    sc.beginPath();
+    sc.arc(pcx, pcy, pr, 0, 6.29);
+    sc.fill();
+    sc.globalCompositeOperation = 'lighter';
+    sc.strokeStyle = this._alpha(theme.star, 0.30);
+    sc.lineWidth = Math.max(1.5, pr * 0.07);
+    sc.beginPath();
+    sc.ellipse(pcx, pcy, pr * 1.65, pr * 0.42, -0.35, 0, 6.29);
+    sc.stroke();
+
     // bright horizon core line
     const hy = h * CAMERA.horizon;
     const hg = sc.createLinearGradient(0, hy - 2, 0, hy + 2);
@@ -140,6 +198,82 @@ export class Renderer {
       ctx.fillRect(sx, sy, r, r);
     }
     ctx.globalAlpha = 1;
+
+    // ---- occasional shooting star across the sky ----
+    this._meteorNext -= dtReal;
+    if (this._meteorNext <= 0 && !this._meteor) {
+      this._meteor = { x: Math.random() * 0.7 + 0.1, y: Math.random() * 0.5, a: 2.5 + Math.random() * 0.6, life: 0.7 };
+      this._meteorNext = 4 + Math.random() * 6;
+    }
+    if (this._meteor) {
+      const m = this._meteor;
+      m.life -= dtReal;
+      if (m.life <= 0) this._meteor = null;
+      else {
+        const prog = 1 - m.life / 0.7;
+        const mx = (m.x + Math.cos(m.a) * prog * 0.3) * w;
+        const my = (m.y + Math.sin(m.a) * -prog * 0.25) * horizonY;
+        ctx.globalCompositeOperation = 'lighter';
+        const tail = ctx.createLinearGradient(mx, my, mx - Math.cos(m.a) * 60, my + Math.sin(m.a) * 50);
+        tail.addColorStop(0, `rgba(255,255,255,${0.8 * m.life})`);
+        tail.addColorStop(1, 'transparent');
+        ctx.strokeStyle = tail;
+        ctx.lineWidth = 1.6;
+        ctx.beginPath();
+        ctx.moveTo(mx, my);
+        ctx.lineTo(mx - Math.cos(m.a) * 60, my + Math.sin(m.a) * 50);
+        ctx.stroke();
+        ctx.globalCompositeOperation = 'source-over';
+      }
+    }
+
+    // ---- 3D space dust + drifting scenery surrounding the track ----
+    ctx.globalCompositeOperation = 'lighter';
+    for (const p of this.dust) {
+      const zRel = ((p.zSeed - ship.z) % 55 + 55) % 55;
+      const zW = camZ + NEAR + 0.4 + zRel;
+      const sx = px(p.x, zW), sy = py(p.y, zW);
+      if (sy < -20 || sy > h + 20 || sx < -20 || sx > w + 20) continue;
+      const depth = 1 - zRel / 55;
+      ctx.globalAlpha = (0.25 + 0.5 * depth) * (0.6 + 0.4 * Math.sin(t * 2 + p.tw));
+      ctx.fillStyle = theme.star;
+      const r = p.s * (0.6 + depth * 2.2);
+      ctx.fillRect(sx, sy, r, r);
+    }
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = 'source-over';
+    for (const o of this.scenery) {
+      const zRel = ((o.zSeed - ship.z * 0.85) % 130 + 130) % 130;
+      const zW = camZ + 3 + zRel;
+      const sx = px(o.x, zW), sy = py(o.y, zW);
+      if (sy < -60 || sy > h + 60 || sx < -80 || sx > w + 80) continue;
+      const s = (f / (zW - camZ)) * o.size;
+      ctx.save();
+      ctx.translate(sx, sy);
+      if (o.kind === 'rock') {
+        ctx.rotate(o.spin + t * 0.15);
+        const rg = ctx.createRadialGradient(-s * 0.1, -s * 0.1, 0, 0, 0, s * 0.35);
+        rg.addColorStop(0, '#6a6274');
+        rg.addColorStop(1, '#221e2e');
+        ctx.fillStyle = rg;
+        ctx.beginPath();
+        ctx.moveTo(s * 0.32, 0);
+        for (let k = 1; k < 7; k++) {
+          const ang = (k / 7) * 6.28;
+          const rr = s * (0.24 + 0.10 * Math.sin(o.spin * 7 + k * 3));
+          ctx.lineTo(Math.cos(ang) * rr, Math.sin(ang) * rr);
+        }
+        ctx.closePath();
+        ctx.fill();
+      } else {
+        // derelict pylon: slim monolith with a blinking beacon
+        ctx.fillStyle = '#1c1830';
+        ctx.fillRect(-s * 0.05, -s * 0.5, s * 0.1, s * 0.9);
+        ctx.fillStyle = this._alpha(theme.glow, 0.3 + 0.5 * (Math.sin(t * 3 + o.spin) > 0.6 ? 1 : 0));
+        ctx.fillRect(-s * 0.035, -s * 0.55, s * 0.07, s * 0.07);
+      }
+      ctx.restore();
+    }
 
     // ---- track rows, far to near ----
     const firstRow = Math.max(0, Math.floor(ship.z) - 5);
@@ -231,6 +365,103 @@ export class Renderer {
         }
       }
       ctx.globalAlpha = 1;
+    }
+
+    // ---- energy rails along the track edges (pulses race forward) ----
+    ctx.globalCompositeOperation = 'lighter';
+    const railStart = Math.max(firstRow, Math.ceil(camZ + NEAR + 0.2));
+    for (const railX of [-3.62, 3.62]) {
+      for (let row = railStart; row < lastRow - 2; row += 2) {
+        const pulse = ((row - t * 10) % 14 + 14) % 14 < 2.2;
+        const fade = row > fadeStart ? 1 - (row - fadeStart) / 9 : 1;
+        if (fade <= 0.05) continue;
+        ctx.strokeStyle = this._alpha(theme.glow, (pulse ? 0.55 : 0.14) * fade);
+        ctx.lineWidth = pulse ? 2.2 : 1.2;
+        ctx.beginPath();
+        ctx.moveTo(px(railX, row), py(0.04, row));
+        ctx.lineTo(px(railX, row + 2), py(0.04, row + 2));
+        ctx.stroke();
+      }
+    }
+    ctx.globalCompositeOperation = 'source-over';
+
+    // ---- comet strikes: target reticle -> incoming streak ----
+    for (const c of game.comets || []) {
+      if (c.row + 0.5 - camZ < NEAR || c.row > lastRow) continue;
+      const cz = c.row + 0.5;
+      if (c.state === 'warn') {
+        // reticle shifts cyan -> gold -> red as impact nears
+        const prog = Math.min(1, c.t / COMETS.warnS);
+        const color = prog < 0.55
+          ? this._lerpColor('#54f0ff', '#ffd24a', prog / 0.55)
+          : this._lerpColor('#ffd24a', '#ff3b30', (prog - 0.55) / 0.45);
+        const blink = prog > 0.8 ? (Math.sin(t * 30) > 0 ? 1 : 0.35) : 1;
+        const rx = Math.abs(px(c.lane + 0.45, cz) - px(c.lane, cz)) * (1.15 - prog * 0.35);
+        const ry = Math.abs(py(0.01, cz + 0.45) - py(0.01, cz)) * (1.15 - prog * 0.35);
+        ctx.save();
+        // darken the doomed tile so the reticle pops on bright floors
+        this._quad(ctx,
+          px(c.lane - 0.5, c.row), py(0.005, c.row), px(c.lane + 0.5, c.row), py(0.005, c.row),
+          px(c.lane + 0.5, c.row + 1), py(0.005, c.row + 1), px(c.lane - 0.5, c.row + 1), py(0.005, c.row + 1),
+          `rgba(10,0,8,${0.30 + 0.25 * prog})`);
+        ctx.globalCompositeOperation = 'lighter';
+        // beacon column so the target reads from far away
+        const bx0 = px(c.lane - 0.20, cz), bx1 = px(c.lane + 0.20, cz);
+        const byTop = py(3.6, cz), byBot = py(0.02, cz);
+        const beam = ctx.createLinearGradient(0, byTop, 0, byBot);
+        beam.addColorStop(0, 'transparent');
+        beam.addColorStop(1, this._alpha(color, (0.45 + 0.20 * Math.sin(t * 8)) * blink));
+        ctx.fillStyle = beam;
+        ctx.fillRect(Math.min(bx0, bx1), byTop, Math.abs(bx1 - bx0), byBot - byTop);
+        ctx.strokeStyle = this._alpha(color, blink);
+        ctx.lineWidth = 2.5;
+        ctx.beginPath();
+        ctx.ellipse(px(c.lane, cz), py(0.01, cz), rx, ry, 0, 0, 6.29);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.ellipse(px(c.lane, cz), py(0.01, cz), rx * 0.45, ry * 0.45, 0, 0, 6.29);
+        ctx.stroke();
+        // crosshair ticks
+        ctx.beginPath();
+        ctx.moveTo(px(c.lane - 0.55, cz), py(0.01, cz));
+        ctx.lineTo(px(c.lane - 0.30, cz), py(0.01, cz));
+        ctx.moveTo(px(c.lane + 0.30, cz), py(0.01, cz));
+        ctx.lineTo(px(c.lane + 0.55, cz), py(0.01, cz));
+        ctx.stroke();
+        ctx.restore();
+      } else {
+        // the comet streaks in from high above
+        const k = Math.min(1, c.t / COMETS.strikeS);
+        const cxW = c.lane + (1 - k) * 2.2;
+        const cyW = (1 - k) * 6.5;
+        const czW = cz - (1 - k) * 5;
+        if (czW - camZ > NEAR) {
+          const hx = px(cxW, czW), hy2 = py(cyW, czW);
+          const txp = px(cxW + 1.4, czW - 3), typ = py(cyW + 3.6, czW - 3);
+          ctx.save();
+          ctx.globalCompositeOperation = 'lighter';
+          const tail = ctx.createLinearGradient(hx, hy2, txp, typ);
+          tail.addColorStop(0, 'rgba(255,255,255,0.95)');
+          tail.addColorStop(0.3, 'rgba(255,170,90,0.7)');
+          tail.addColorStop(1, 'transparent');
+          ctx.strokeStyle = tail;
+          ctx.lineWidth = 5;
+          ctx.beginPath();
+          ctx.moveTo(hx, hy2);
+          ctx.lineTo(txp, typ);
+          ctx.stroke();
+          const s = f / (czW - camZ);
+          const core = ctx.createRadialGradient(hx, hy2, 0, hx, hy2, Math.max(3, s * 0.14));
+          core.addColorStop(0, '#ffffff');
+          core.addColorStop(0.5, '#ffb060');
+          core.addColorStop(1, 'transparent');
+          ctx.fillStyle = core;
+          ctx.beginPath();
+          ctx.arc(hx, hy2, Math.max(3, s * 0.14), 0, 6.29);
+          ctx.fill();
+          ctx.restore();
+        }
+      }
     }
 
     // ---- items (coins / ammo), far to near ----
@@ -452,33 +683,80 @@ export class Renderer {
     ctx.globalCompositeOperation = 'source-over';
   }
 
-  // energy fence: two posts + a flickering additive beam at hurdle height —
-  // reads as "too tall to hop, HOLD to clear"
+  // electric fence: crackling lightning fills the WHOLE space from the floor
+  // to the top rail — unmistakably a wall you must jump OVER, never under
   _hurdle(ctx, px, py, lx, row, theme, t) {
     const z = row + 0.5;
     const h = BLOCK_HEIGHTS.hurdle;
     const flick = 0.7 + 0.3 * Math.sin(t * 18 + row * 3.1);
-    // posts at the cell edges
-    for (const side of [-0.44, 0.44]) {
+    // cheap deterministic hash for jittering bolts (reseeds ~12x/sec)
+    const seed0 = row * 131 + ((t * 12) | 0) * 977;
+    const rnd = (n) => {
+      const v = Math.sin(seed0 + n * 127.1) * 43758.5453;
+      return v - Math.floor(v);
+    };
+
+    // posts with glowing caps
+    for (const side of [-0.46, 0.46]) {
       this._quad(ctx,
-        px(lx + side - 0.05, z), py(h + 0.06, z),
-        px(lx + side + 0.05, z), py(h + 0.06, z),
-        px(lx + side + 0.05, z), py(0, z),
-        px(lx + side - 0.05, z), py(0, z),
+        px(lx + side - 0.06, z), py(h + 0.10, z),
+        px(lx + side + 0.06, z), py(h + 0.10, z),
+        px(lx + side + 0.06, z), py(0, z),
+        px(lx + side - 0.06, z), py(0, z),
         this._shade(theme.blockDark, 0.9));
     }
+
+    ctx.save();
     ctx.globalCompositeOperation = 'lighter';
-    // main beam
-    this._quad(ctx,
-      px(lx - 0.44, z), py(h, z), px(lx + 0.44, z), py(h, z),
-      px(lx + 0.44, z), py(h - 0.14, z), px(lx - 0.44, z), py(h - 0.14, z),
-      this._alpha('#ff5c7a', 0.55 * flick));
-    // faint field below the beam
-    this._quad(ctx,
-      px(lx - 0.44, z), py(h - 0.14, z), px(lx + 0.44, z), py(h - 0.14, z),
-      px(lx + 0.44, z), py(0, z), px(lx - 0.44, z), py(0, z),
-      this._alpha('#ff5c7a', 0.10 * flick));
-    ctx.globalCompositeOperation = 'source-over';
+
+    // charged field haze floor-to-rail (blocks the "drive under" read)
+    const fy0 = py(h, z), fy1 = py(0, z);
+    const fx0 = px(lx - 0.46, z), fx1 = px(lx + 0.46, z);
+    const field = ctx.createLinearGradient(0, fy0, 0, fy1);
+    field.addColorStop(0, this._alpha('#8ae2ff', 0.30 * flick));
+    field.addColorStop(0.5, this._alpha('#4da8ff', 0.16 * flick));
+    field.addColorStop(1, this._alpha('#8ae2ff', 0.26 * flick));
+    this._quad(ctx, fx0, fy0, fx1, fy0, fx1, fy1, fx0, fy1, field);
+
+    // jagged lightning bolts spanning top rail -> floor
+    for (let b = 0; b < 3; b++) {
+      const xa = lx - 0.36 + rnd(b) * 0.72;         // start x at the rail
+      const xb = lx - 0.36 + rnd(b + 10) * 0.72;    // end x at the floor
+      ctx.beginPath();
+      ctx.moveTo(px(xa, z), py(h - 0.02, z));
+      const segs = 4;
+      for (let k = 1; k <= segs; k++) {
+        const yy = (h - 0.02) * (1 - k / segs);
+        const xx = xa + (xb - xa) * (k / segs) + (rnd(b * 7 + k) - 0.5) * 0.22;
+        ctx.lineTo(px(xx, z), py(Math.max(0.01, yy), z));
+      }
+      ctx.strokeStyle = this._alpha('#e8fbff', 0.85 * flick);
+      ctx.lineWidth = 1.6;
+      ctx.stroke();
+      ctx.strokeStyle = this._alpha('#54c8ff', 0.35 * flick);
+      ctx.lineWidth = 4;
+      ctx.stroke();
+    }
+
+    // top rail: hot core + glow
+    this._quad(ctx, fx0, py(h + 0.03, z), fx1, py(h + 0.03, z),
+      fx1, py(h - 0.09, z), fx0, py(h - 0.09, z),
+      this._alpha('#ffffff', 0.75 * flick));
+    this._quad(ctx, fx0, py(h + 0.09, z), fx1, py(h + 0.09, z),
+      fx1, py(h - 0.16, z), fx0, py(h - 0.16, z),
+      this._alpha('#54c8ff', 0.35 * flick));
+
+    // spark caps on the posts
+    for (const side of [-0.46, 0.46]) {
+      const sx = px(lx + side, z), sy = py(h + 0.10, z);
+      const g = ctx.createRadialGradient(sx, sy, 0, sx, sy, 6);
+      g.addColorStop(0, `rgba(232,251,255,${0.9 * flick})`);
+      g.addColorStop(1, 'transparent');
+      ctx.fillStyle = g;
+      ctx.fillRect(sx - 6, sy - 6, 12, 12);
+    }
+
+    ctx.restore();
   }
 
   // floating wreckage beam: solid band the ship must stay UNDER
@@ -723,11 +1001,18 @@ export class Renderer {
     const a = this._rgb(hexA), b = this._rgb(hexB);
     return `rgb(${Math.round(a.r + (b.r - a.r) * k)},${Math.round(a.g + (b.g - a.g) * k)},${Math.round(a.b + (b.b - a.b) * k)})`;
   }
-  _rgb(hex) {
-    if (this._rgbCache?.[hex]) return this._rgbCache[hex];
-    const n = parseInt(hex.slice(1), 16);
-    const v = { r: (n >> 16) & 255, g: (n >> 8) & 255, b: n & 255 };
-    (this._rgbCache ||= {})[hex] = v;
+  _rgb(color) {
+    if (this._rgbCache?.[color]) return this._rgbCache[color];
+    let v;
+    if (color[0] === '#') {
+      const n = parseInt(color.slice(1), 16);
+      v = { r: (n >> 16) & 255, g: (n >> 8) & 255, b: n & 255 };
+    } else {
+      // accepts rgb(r,g,b) / rgba(r,g,b,a) — lets helpers compose (_alpha of _lerpColor)
+      const m = color.match(/([\d.]+)[,\s]+([\d.]+)[,\s]+([\d.]+)/);
+      v = m ? { r: +m[1], g: +m[2], b: +m[3] } : { r: 255, g: 255, b: 255 };
+    }
+    (this._rgbCache ||= {})[color] = v;
     return v;
   }
 }
