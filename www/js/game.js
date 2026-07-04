@@ -611,6 +611,8 @@ export class Game {
     for (let i = this.history.length - 1; i >= 0; i--) {
       if (this.history[i].t <= targetT) { idx = i; break; }
     }
+    // never resume mid-air: keep rewinding (further back) to solid ground
+    while (idx > 0 && !this.history[idx].grounded) idx--;
     this._rewindAnim = {
       fromIdx: this.history.length - 1,
       toIdx: idx,

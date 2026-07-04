@@ -119,7 +119,7 @@ const midiHz = (m) => 440 * Math.pow(2, (m - 69) / 12);
 
 const SONGS = {
   level: {
-    bpm: 152,
+    bpm: 158,
     bars: 4,
     // per bar: 8 eighth-note bass hits (root pump with octave kicks)
     bass: [
@@ -168,6 +168,11 @@ const SONGS = {
 let songName = 'menu';
 let nextNoteTime = 0;
 let step = 0;
+let rateMult = 1; // tempo follows the ship: faster flight = faster music
+
+export function setMusicRate(m) {
+  rateMult = Math.max(0.7, Math.min(1.6, m));
+}
 
 function chipNote(type, midi, t0, dur, peak) {
   const osc = ctx.createOscillator();
@@ -198,7 +203,7 @@ function chipNoise(t0, dur, filterHz, peak) {
 function scheduleMusic() {
   if (!ctx || !musicGain) return;
   const song = SONGS[songName];
-  const step16 = 60 / song.bpm / 4;
+  const step16 = 60 / (song.bpm * rateMult) / 4;
   while (nextNoteTime < ctx.currentTime + 0.3) {
     const t0 = nextNoteTime;
     const s = step % 16;                              // 16th within the bar
@@ -209,7 +214,11 @@ function scheduleMusic() {
       const b = song.bass[bar][e];
       if (b) chipNote(song.bassType, b, t0, step16 * 1.6, song.bassGain);
       const l = song.lead[bar][e];
-      if (l) chipNote(song.leadType, l, t0, step16 * 1.7, song.leadGain);
+      if (l) {
+        chipNote(song.leadType, l, t0, step16 * 1.7, song.leadGain);
+        // arcade sparkle: quiet octave doubling on the lead
+        if (songName === 'level') chipNote(song.leadType, l + 12, t0, step16 * 1.4, song.leadGain * 0.35);
+      }
     }
     // 16th-note arpeggio, one octave up, up-down pattern
     const chord = song.arp[bar];

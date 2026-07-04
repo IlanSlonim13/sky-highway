@@ -1108,6 +1108,12 @@ function loop(now) {
   game.frame(dt);
   renderer.render(game, dt);
   syncHud();
+  // music tempo follows the ship: faster flight = faster soundtrack
+  if (game.state === 'running') {
+    audio.setMusicRate(0.9 + (game.currentSpeed * game.ship.speedMul - 6.5) * 0.055);
+  } else {
+    audio.setMusicRate(1);
+  }
   requestAnimationFrame(loop);
 }
 requestAnimationFrame(loop);

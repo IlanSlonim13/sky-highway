@@ -27,18 +27,25 @@ export class Renderer {
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d');
     this.t = 0;
+    // a dense field of remote stars covering the WHOLE screen (the track is
+    // drawn over them, so below-horizon stars fill the void beside the road)
     this.stars = [];
-    for (let i = 0; i < 190; i++) {
-      this.stars.push({ x: Math.random(), y: Math.random(), d: 0.2 + Math.random() * 0.8, tw: Math.random() * 6.28 });
+    for (let i = 0; i < 460; i++) {
+      this.stars.push({
+        x: Math.random(),
+        y: Math.random(),
+        d: Math.random() < 0.7 ? 0.15 + Math.random() * 0.4 : 0.55 + Math.random() * 0.45,
+        tw: Math.random() * 6.28,
+      });
     }
     // 3D space dust surrounding the track (never over the playfield: |x| > 4.5)
     this.dust = [];
-    for (let i = 0; i < 80; i++) {
+    for (let i = 0; i < 150; i++) {
       const side = Math.random() < 0.5 ? -1 : 1;
       this.dust.push({
-        x: side * (4.5 + Math.random() * 11),
-        y: -2.5 + Math.random() * 6,
-        zSeed: Math.random() * 55,
+        x: side * (4.5 + Math.random() * 13),
+        y: -3 + Math.random() * 7,
+        zSeed: Math.random() * 70,
         s: 0.5 + Math.random() * 1.4,
         tw: Math.random() * 6.28,
       });
@@ -187,15 +194,22 @@ export class Renderer {
     // ---- sky (pre-rendered nebula) ----
     ctx.drawImage(assets.sky, -10, -10, w + 20, h + 20);
 
-    // stars (above horizon, parallax with travel)
+    // stars everywhere (full screen, parallax with travel; the track draws
+    // over them, so the deep void beside the road twinkles too)
     for (const s of this.stars) {
       const sx = ((s.x - ship.z * 0.004 * s.d) % 1 + 1) % 1 * w;
-      const sy = s.y * horizonY * 0.96;
+      const sy = s.y * h;
       const a = 0.35 + 0.3 * Math.sin(t * 2 + s.tw);
       ctx.fillStyle = theme.star;
       ctx.globalAlpha = a * s.d;
-      const r = s.d * 1.6;
+      const r = 0.5 + s.d * 1.5;
       ctx.fillRect(sx, sy, r, r);
+      if (s.d > 0.85) {
+        // bright stars get a little cross glint
+        ctx.globalAlpha = a * 0.4;
+        ctx.fillRect(sx - r * 1.6, sy + r * 0.25, r * 4.2, r * 0.5);
+        ctx.fillRect(sx + r * 0.25, sy - r * 1.6, r * 0.5, r * 4.2);
+      }
     }
     ctx.globalAlpha = 1;
 
@@ -824,15 +838,16 @@ export class Renderer {
   }
 
   _boostDecal(ctx, px, py, lx, row) {
+    // chevrons point AWAY from the camera (+z), the direction of travel
     const phase = (this.t * 3 + row * 0.5) % 1;
     ctx.globalCompositeOperation = 'lighter';
     ctx.fillStyle = this._alpha('#ffffff', 0.40 + 0.25 * Math.sin(phase * 6.28));
     for (let i = 0; i < 2; i++) {
       const zc = row + 0.3 + i * 0.4;
       ctx.beginPath();
-      ctx.moveTo(px(lx - 0.28, zc + 0.18), py(0.01, zc + 0.18));
-      ctx.lineTo(px(lx, zc), py(0.01, zc));
-      ctx.lineTo(px(lx + 0.28, zc + 0.18), py(0.01, zc + 0.18));
+      ctx.moveTo(px(lx - 0.28, zc), py(0.01, zc));
+      ctx.lineTo(px(lx, zc + 0.18), py(0.01, zc + 0.18));
+      ctx.lineTo(px(lx + 0.28, zc), py(0.01, zc));
       ctx.lineTo(px(lx, zc + 0.09), py(0.01, zc + 0.09));
       ctx.closePath();
       ctx.fill();
