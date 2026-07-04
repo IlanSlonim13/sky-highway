@@ -28,7 +28,13 @@ export async function initAds(removed) {
     const plugin = window.Capacitor?.Plugins?.AdMob;
     if (plugin) {
       nativeAdmob = plugin;
-      await nativeAdmob.initialize({ initializeForTesting: false });
+      await nativeAdmob.initialize({
+        initializeForTesting: false,
+        // store-compliance defaults; align with your Play/App Store rating
+        maxAdContentRating: 'T',
+        tagForChildDirectedTreatment: false,
+        tagForUnderAgeOfConsent: false,
+      });
     }
   } catch (e) {
     console.warn('AdMob unavailable, ads disabled on native:', e);

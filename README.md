@@ -25,6 +25,14 @@ after a crash, your failed attempt's echo joins the next try. Beat your echo to 
 for bonus coins. Combined with the 3-second-rewind revive, time manipulation is the game's
 identity.
 
+**Two-tier jump & obstacles**
+- ▲ **Tap to hop, HOLD to soar** — a quick tap clears low blocks; holding the jump button
+  keeps the ship rising for a bigger, longer jump. Levels are built to demand both.
+- 🚧 **Hurdles** (energy fences) — too tall for a tap; need a held jump
+- ☄️ **Space debris** — floating wreckage you must stay *under*: tap-hop or drive beneath,
+  never hold up into it
+- ⭕ **Rings** — thread them at the top of a held jump over wide gaps for bonus coins
+
 **Core mechanics**
 - 🐌 **Slow motion** — purchasable charges that bend time for 6 seconds
 - ⏪ **Extra life with 3-second rewind** — crash, watch a rewarded ad (or spend a purchased
@@ -32,20 +40,33 @@ identity.
   inside the rewound window are restored
 - 🔫 **Destructible barriers & ammo** — blast orange barriers for bonus coins, or steer
   around them (never required)
-- ⚡ **Flow meter** — coins, near-misses, cleared gaps and barrier kills chain a ×1–×5
-  multiplier on everything you earn; crash and it's gone
+- ⚡ **Flow meter** — coins, near-misses, rings, cleared gaps and barrier kills chain a
+  ×1–×5 multiplier on everything you earn; crash and it's gone
 
-**Engagement & economy**
-- 🎯 **3 daily missions** (date-rotated) + **12 lifetime achievements** with coin/ship rewards
-- 🛠 **Hangar** — 8 ships and 6 trails: coins, achievements, Starter Pack and Premium unlocks
+**Progression & engagement**
+- 🎖 **Pilot XP & ranks** — every run (even a failed one) pays XP toward 50 ranks with
+  escalating coin rewards and milestone ships/trails
+- ⭐ **3-star levels + star chests** — finish, collect, and beat your echo for stars;
+  cash total-star milestones in for coins and an exclusive trail
+- 🎡 **Daily prize wheel** — a free spin every day, one more for a rewarded ad
+- 🎯 **Daily missions** (date-rotated) + **13 lifetime achievements**
+- ☀ **First victory of the day pays double**
+- 🛠 **Hangar** — ships and trails unlocked by coins, ranks, achievements, and packs
+
+**Economy & monetization**
 - 🐷 **Piggy Bank** — 10% of all earnings pile up; crack it with an IAP or 3 rewarded ads
+- 🏷 **Daily Deal** — a rotating power-up at 50% off, one day only
 - 🪙 Coin sinks: slow-mo, rewinds, ammo, ships, trails, streak savers
-- 📺 **Ads** — AdMob banner + interstitial + rewarded placements (extra life, double coins,
-  extra daily attempt, streak saver, double mission reward, piggy bank, free coins)
+- 📺 **Ads** — AdMob banner + rewarded placements, with relaxed interstitials (every 6th
+  fail / 4th win, never within 3 minutes)
 - 👑 **Premium ($4.99)** — no banners/interstitials, 5 daily attempts, exclusive Aurora
   ship + Gold trail, +10% coin earnings (rewarded ads stay available by choice)
-- 📱 **Mobile-first** — touch steering (drag) + tap to jump, HUD buttons, safe-area aware,
-  portrait & landscape, works offline (all progress in localStorage)
+- 📱 **Mobile-first** — touch steering (drag) + tap/hold jump, **left-handed mode**, HUD
+  buttons, safe-area aware, portrait & landscape, works offline (all progress local)
+
+Store-distribution artifacts live at the repo root: **[PRIVACY-POLICY.md](PRIVACY-POLICY.md)**,
+**[DISTRIBUTION.md](DISTRIBUTION.md)** (Apple + Google release runbook), and
+**[STORE-LISTING.md](STORE-LISTING.md)** (ready-to-paste listing copy).
 
 ## Play in a browser (dev)
 
@@ -54,8 +75,9 @@ python3 -m http.server 8080 -d www     # or: npm run serve
 # open http://localhost:8080
 ```
 
-Controls: **drag** to steer, **tap** to jump (or the ▲ button), **⌖** fires, **🐌** slow motion.
-Keyboard: arrows / A-D steer, Space jumps, F fires, P pauses.
+Controls: **drag** to steer, **tap** to hop, **hold ▲** to jump higher, **⌖** fires,
+**🐌** slow motion. Left-handed mode swaps the button sides (⚙ Settings).
+Keyboard: arrows / A-D steer, **Space** jumps (hold for a bigger jump), F fires, P pauses.
 
 Append `?debug` to the URL to expose `window.__shq` testing hooks.
 
@@ -120,14 +142,16 @@ Levels are 7-lane grids, one character per cell (`www/js/levels.js`):
 |------|-------------------------------|------|---------------------------------|
 | `.`  | void (gap)                    | `C`  | floor + coin                    |
 | `#`  | floor                         | `c`  | floating coin (over a gap)      |
-| `^`  | low block — jump it           | `X`  | hazard floor — deadly           |
+| `^`  | low block — tap-jump it       | `X`  | hazard floor — deadly           |
 | `H`  | tall block — avoid            | `D`  | destructible barrier — shoot or avoid |
 | `B`  | boost pad                     | `A`  | floor + ammo pickup (+3 shots)  |
-| `J`  | bounce pad (high jump)        |      |                                 |
+| `J`  | bounce pad (high fling)       | `=`  | hurdle — needs a **held** jump  |
+| `~`  | space debris — stay under it  | `O`  | ring — thread it mid-held-jump  |
 
 Levels 1–10 are handcrafted with the builder DSL; levels 11–500 come from a seeded
-generator that carves a guaranteed-safe path first and decorates around it. Validate any
-change with:
+generator that carves a guaranteed-safe path first and decorates around it. The BFS
+solver models both jump tiers, so every level is provably completable with the tap/held
+mix (and with zero shots fired). Validate any change with:
 
 ```bash
 npm run validate     # BFS-solves all 500 levels; must print 500/500
@@ -145,6 +169,15 @@ npm install @capacitor/local-notifications && npx cap sync
 
 On web the call is a silent no-op. An in-app review prompt hook fires once after the 3rd
 level win when a rate-app plugin is present (`RateApp.requestReview`).
+
+## Store assets
+
+Regenerate the 1024² icon and 2732² splash source images (used by
+`npx @capacitor/assets generate --iconBackgroundColor '#050014'`):
+
+```bash
+npm run assets       # node tools/gen-store-assets.mjs -> resources/icon.png, splash.png
+```
 
 ## Project layout
 
