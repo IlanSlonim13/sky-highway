@@ -139,6 +139,22 @@ h2.lose { color: var(--danger); text-shadow: 0 0 14px var(--danger); }
 
 /* ---------- level select ---------- */
 #screen-levels { justify-content: flex-start; padding-top: calc(70px + var(--safe-top)); background: rgba(3, 0, 12, 0.55); }
+.sector-tabs {
+  display: flex; gap: 6px;
+  width: 100%; max-width: 560px;
+  padding: 4px;
+}
+.sector-tab {
+  flex: 1;
+  font: inherit; font-size: 0.72rem; font-weight: bold; letter-spacing: 0.06em;
+  color: #b0a8cc;
+  background: rgba(30, 22, 60, 0.7);
+  border: 1px solid #3a3358;
+  border-radius: 10px;
+  min-height: 40px;
+  cursor: pointer;
+}
+.sector-tab.active { color: #fff; border-color: var(--glow2); box-shadow: 0 0 10px rgba(84, 240, 255, 0.3); }
 .level-grid {
   width: 100%; max-width: 560px;
   overflow-y: auto;

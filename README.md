@@ -2,7 +2,7 @@
 
 A **SkyRoads-style retro arcade runner** built for mobile. Pilot a neon ship down highways
 suspended in space: jump gaps, weave through blocks, blast destructible barriers, and chase
-the finish gate across **100 levels**.
+the finish gate across **500 levels**.
 
 Built as a fully self-contained HTML5 game (zero runtime dependencies) wrapped with
 [Capacitor](https://capacitorjs.com) for Android and iOS.
@@ -10,7 +10,7 @@ Built as a fully self-contained HTML5 game (zero runtime dependencies) wrapped w
 ## Features
 
 **Three modes**
-- 🗺️ **Campaign** — 100 levels: 10 handcrafted + 90 procedurally generated, every one
+- 🗺️ **Campaign** — 500 levels: 10 handcrafted + 490 procedurally generated, growing from ~2-minute sprints to marathon runs as you progress, every one
   *provably completable* (a BFS solver validates each level, including with zero shots fired)
 - 📅 **Today's Run** — a daily challenge where *the date is the seed*: everyone on Earth
   flies the same track each day, no server needed. 3 attempts/day (5 for Premium, +1 per
@@ -125,12 +125,12 @@ Levels are 7-lane grids, one character per cell (`www/js/levels.js`):
 | `B`  | boost pad                     | `A`  | floor + ammo pickup (+3 shots)  |
 | `J`  | bounce pad (high jump)        |      |                                 |
 
-Levels 1–10 are handcrafted with the builder DSL; levels 11–100 come from a seeded
+Levels 1–10 are handcrafted with the builder DSL; levels 11–500 come from a seeded
 generator that carves a guaranteed-safe path first and decorates around it. Validate any
 change with:
 
 ```bash
-npm run validate     # BFS-solves all 100 levels; must print 100/100
+npm run validate     # BFS-solves all 500 levels; must print 500/500
 ```
 
 ## Streak reminders (local notifications)

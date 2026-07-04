@@ -1,7 +1,7 @@
 {
   "name": "sky-highway",
   "version": "1.0.0",
-  "description": "SkyRoads-style retro arcade runner for Android & iOS \u2014 neon highways, slow motion, 3-second-rewind extra lives, 100 levels.",
+  "description": "SkyRoads-style retro arcade runner for Android & iOS \u2014 neon highways, slow motion, 3-second-rewind extra lives, 500 levels.",
   "private": true,
   "type": "module",
   "scripts": {

@@ -25,6 +25,11 @@ const renderer = new Renderer(canvas);
 let currentLevelIndex = 0;
 let failsSinceAd = 0;
 let winsSinceAd = 0;
+let lastInterstitialAt = -Infinity; // enforce a minimum gap between interstitials
+
+function interstitialAllowed() {
+  return (performance.now() - lastInterstitialAt) / 1000 >= ADS.minInterstitialGapS;
+}
 let reviveTimer = null;
 let coinsDoubled = false;          // per-results-screen: double-coins used
 let lastEarnedRunCoins = 0;        // what the double button doubles
@@ -321,8 +326,9 @@ game.events.onComplete = async ({ coins, beatEcho }) => {
   winsSinceAd++;
   showOverlay('screen-complete');
   refreshWallets();
-  if (winsSinceAd >= ADS.interstitialEveryNWins) {
+  if (winsSinceAd >= ADS.interstitialEveryNWins && interstitialAllowed()) {
     winsSinceAd = 0;
+    lastInterstitialAt = performance.now();
     await ads.showInterstitial();
   }
 };
@@ -357,8 +363,9 @@ async function showFailed() {
   checkAchievements();
   showOverlay('screen-failed');
   refreshWallets();
-  if (failsSinceAd >= ADS.interstitialEveryNFails) {
+  if (failsSinceAd >= ADS.interstitialEveryNFails && interstitialAllowed()) {
     failsSinceAd = 0;
+    lastInterstitialAt = performance.now();
     await ads.showInterstitial();
   }
 }
@@ -587,11 +594,28 @@ $('btn-failed-menu').addEventListener('click', () => { sfx.click(); showBase('sc
 // ---------------------------------------------------------------------------
 // Level select
 // ---------------------------------------------------------------------------
-function buildLevelGrid() {
+const SECTOR_SIZE = 100;
+
+function buildLevelGrid(sector) {
+  const { unlocked, best } = save.get();
+  const sectors = Math.ceil(LEVEL_COUNT / SECTOR_SIZE);
+  if (sector === undefined) sector = Math.min(sectors - 1, Math.floor((unlocked - 1) / SECTOR_SIZE));
+
+  const tabs = $('sector-tabs');
+  tabs.innerHTML = '';
+  for (let sIdx = 0; sIdx < sectors; sIdx++) {
+    const tab = document.createElement('button');
+    tab.className = 'sector-tab' + (sIdx === sector ? ' active' : '');
+    tab.textContent = `${sIdx * SECTOR_SIZE + 1}–${Math.min(LEVEL_COUNT, (sIdx + 1) * SECTOR_SIZE)}`;
+    tab.addEventListener('click', () => { sfx.click(); buildLevelGrid(sIdx); });
+    tabs.appendChild(tab);
+  }
+
   const grid = $('level-grid');
   grid.innerHTML = '';
-  const { unlocked, best } = save.get();
-  for (let i = 0; i < LEVEL_COUNT; i++) {
+  const from = sector * SECTOR_SIZE;
+  const to = Math.min(LEVEL_COUNT, from + SECTOR_SIZE);
+  for (let i = from; i < to; i++) {
     const cell = document.createElement('button');
     cell.className = 'level-cell';
     const b = best[i];
