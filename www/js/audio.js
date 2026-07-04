@@ -84,6 +84,12 @@ export const sfx = {
   boost() { tone({ type: 'sawtooth', from: 200, to: 900, dur: 0.3, peak: 0.4 }); },
   pad() { tone({ type: 'sine', from: 330, to: 660, dur: 0.2, peak: 0.45 }); },
   slowmo() { tone({ type: 'sine', from: 700, to: 180, dur: 0.5, peak: 0.4 }); },
+  flowUp(tier = 2) {
+    // rising two-note blip, pitched by flow tier
+    const base = 300 + tier * 110;
+    tone({ type: 'square', from: base, dur: 0.06, peak: 0.3 });
+    tone({ type: 'square', from: base * 1.5, dur: 0.09, peak: 0.3, delay: 0.06 });
+  },
   rewind() {
     for (let i = 0; i < 3; i++) tone({ type: 'square', from: 300 + i * 180, to: 600 + i * 180, dur: 0.08, peak: 0.3, delay: i * 0.09 });
   },

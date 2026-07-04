@@ -6,9 +6,10 @@
 // the `events` callbacks and drives revive/slow-mo after charges are spent.
 
 import {
-  PHYSICS, SHIP, BOOST, SLOWMO, REWIND, CELL, BLOCK_HEIGHTS, WEAPON, TRACK_LANES,
+  PHYSICS, SHIP, BOOST, SLOWMO, REWIND, CELL, BLOCK_HEIGHTS, WEAPON, FLOW, CAMERA,
 } from './config.js';
 import { sfx } from './audio.js';
+import { EchoRecorder } from './echo.js';
 
 const STEP = 1 / 120;
 
@@ -21,10 +22,29 @@ export class Game {
     this.state = 'idle';
   }
 
-  loadLevel(level, { attract = false, startAmmo = 0 } = {}) {
+  loadLevel(level, { attract = false, startAmmo = 0, echoPlayer = null } = {}) {
     this.level = level;
     this.attract = attract;
+    this.mode = level.endless ? 'endless' : level.daily ? 'daily' : 'campaign';
     this.state = attract ? 'attract' : 'ready';
+
+    // echo ghost: replay of a past run racing beside the player
+    this.echoPlayer = echoPlayer;
+    this.echoClock = 0;      // advances with game time but is NOT rewound by revives
+    this.echoPos = null;
+    this.beatEcho = false;
+    this.recorder = attract ? null : new EchoRecorder();
+
+    // flow meter (style combo -> coin/score multiplier x1..x5)
+    this.flow = 1;
+    this.flowEvents = 0;
+    this.flowTimer = 0;
+
+    // per-run stat deltas, applied to missions/achievements by main.js at run end
+    this.runStats = { coins: 0, airCoins: 0, barriers: 0, jumps: 0, revives: 0, slowmos: 0, maxFlow: 1, gaps: 0, nearMisses: 0 };
+    this._takeoffZ = null;
+    this._nearMissRow = -1;
+    this.trailPoints = [];
 
     this.ship = {
       x: 0, y: 0, z: 0, vy: 0, vx: 0, bank: 0,
@@ -67,7 +87,29 @@ export class Game {
   start() { if (this.state === 'ready') this.state = 'running'; }
 
   get progress() {
-    return this.level ? Math.min(1, this.ship.z / this.level.length) : 0;
+    if (!this.level || !isFinite(this.level.length)) return 0;
+    return Math.min(1, this.ship.z / this.level.length);
+  }
+
+  get distance() { return Math.floor(this.ship.z); }
+
+  get score() { return Math.floor(this.ship.z) + this.runCoins * 10; }
+
+  get currentSpeed() {
+    return this.level.speedAt ? this.level.speedAt(this.ship.z) : this.level.speed;
+  }
+
+  // one style event (coin, near-miss, barrier, cleared gap) feeds the flow combo
+  _styleEvent() {
+    this.flowTimer = FLOW.decaySeconds;
+    if (this.flow >= FLOW.maxTier) return;
+    this.flowEvents++;
+    if (this.flowEvents >= FLOW.eventsPerTier) {
+      this.flowEvents = 0;
+      this.flow++;
+      this.runStats.maxFlow = Math.max(this.runStats.maxFlow, this.flow);
+      sfx.flowUp(this.flow);
+    }
   }
 
   // ------------------------------------------------------------------
@@ -97,6 +139,7 @@ export class Game {
         break;
 
       case 'running': {
+        if (this.level.ensureRows) this.level.ensureRows(Math.floor(this.ship.z) + CAMERA.drawRows + 20);
         const dt = dtReal * this.timeScale;
         this._acc += dt;
         while (this._acc >= STEP && this.state === 'running') {
@@ -126,6 +169,17 @@ export class Game {
 
     this.rewindVisual += ((this.state === 'rewinding' ? 1 : 0) - this.rewindVisual) * Math.min(1, dtReal * 8);
     this.groundInfoForRender = this._sampleGround(this.ship.x, this.ship.z);
+
+    // echo ghost position for the renderer (frozen while the world is frozen)
+    this.echoPos = this.echoPlayer ? this.echoPlayer.positionAt(this.echoClock) : null;
+
+    // engine trail ribbon
+    if (this.state === 'running' && this.shipVisible) {
+      this.trailPoints.push({ x: this.ship.x, y: this.ship.y + 0.1, z: this.ship.z });
+      if (this.trailPoints.length > 16) this.trailPoints.shift();
+    } else if (this.state !== 'paused' && this.state !== 'reviveOffer') {
+      if (this.trailPoints.length) this.trailPoints.shift();
+    }
   }
 
   // ------------------------------------------------------------------
@@ -135,13 +189,25 @@ export class Game {
     const s = this.ship;
     const level = this.level;
     this.time += dt;
+    this.echoClock += dt;
+    this.recorder?.feed(dt, s);
+
+    // flow decay
+    if (this.flowTimer > 0) {
+      this.flowTimer -= dt;
+      if (this.flowTimer <= 0 && this.flow > 1) {
+        this.flow--;
+        this.flowEvents = 0;
+        this.flowTimer = FLOW.decaySeconds * 0.6;
+      }
+    }
 
     // --- forward ---
     if (s.boostT > 0) {
       s.boostT -= dt;
       s.speedMul = 1 + (BOOST.speedMultiplier - 1) * Math.min(1, s.boostT / (BOOST.duration * 0.6));
     } else s.speedMul = 1;
-    s.z += level.speed * s.speedMul * dt;
+    s.z += this.currentSpeed * s.speedMul * dt;
 
     // --- lateral: touch drag is direct, keyboard is velocity-based ---
     const drag = this.input.consumeDrag();
@@ -174,11 +240,14 @@ export class Game {
         this.jumpBuf = 0;
         s.vy = PHYSICS.jumpVelocity;
         s.grounded = false;
+        this.runStats.jumps++;
+        this._takeoffZ = s.z;
         sfx.jump();
       } else if (g.height === -Infinity) {
         s.grounded = false;
         this.coyote = PHYSICS.coyoteTime;
         s.vy = 0;
+        if (this._takeoffZ === null) this._takeoffZ = s.z;
       } else if (g.height > s.y + PHYSICS.stepTolerance) {
         return this._crash('wall');
       } else if (g.height < s.y - 0.3) {
@@ -198,6 +267,8 @@ export class Game {
         if (this.jumpBuf > 0) {
           this.jumpBuf = 0; this.coyote = 0;
           s.vy = PHYSICS.jumpVelocity;
+          this.runStats.jumps++;
+          this._takeoffZ = s.z;
           sfx.jump();
         }
       }
@@ -208,6 +279,11 @@ export class Game {
         if (s.vy <= 0 && prevY >= g.height - 0.02 && s.y <= g.height) {
           // touchdown
           s.y = g.height; s.vy = 0; s.grounded = true;
+          if (this._takeoffZ !== null && s.z - this._takeoffZ >= 2.5) {
+            this.runStats.gaps++;
+            this._styleEvent(); // cleared a real gap
+          }
+          this._takeoffZ = null;
           sfx.land();
           if (g.hazard) return this._crash('burn');
           if (g.pad) { s.vy = PHYSICS.bouncePadVelocity; s.grounded = false; sfx.pad(); }
@@ -219,6 +295,25 @@ export class Game {
     }
 
     if (s.y < PHYSICS.fallDeathY) return this._crash('fall');
+
+    // --- near-miss detection (once per row) ---
+    const nmRow = Math.floor(s.z + SHIP.noseAhead);
+    if (nmRow !== this._nearMissRow) {
+      this._nearMissRow = nmRow;
+      for (let lane = -3; lane <= 3; lane++) {
+        const ch = this._cellAt(nmRow, lane);
+        const solid = ch === CELL.TALL ||
+          (ch === CELL.DESTRUCTIBLE && !this.destroyed.has(nmRow * 7 + (lane + 3)));
+        if (!solid) continue;
+        const d = Math.abs(lane - s.x);
+        // cell edge at 0.5, ship half-width 0.30 -> touching at d = 0.8
+        if (d > 0.8 && d < 0.8 + FLOW.nearMissDist && s.y < BLOCK_HEIGHTS.tall) {
+          this.runStats.nearMisses++;
+          this._styleEvent();
+          break;
+        }
+      }
+    }
 
     // --- pickups ---
     this._collectAt(s);
@@ -245,8 +340,17 @@ export class Game {
     // --- finish ---
     if (s.z >= level.length) {
       this.state = 'complete';
+      // beat your echo: it was a completed-run ghost and hasn't finished yet
+      this.beatEcho = !!(this.echoPlayer && this.echoPlayer.completedRun && !this.echoPlayer.finished);
+      if (this.beatEcho) this.runStats.echoBeat = true;
       sfx.win();
-      this.events.onComplete?.({ coins: this.runCoins, levelIndex: level.index });
+      this.events.onComplete?.({
+        coins: this.runCoins,
+        levelIndex: level.index,
+        beatEcho: this.beatEcho,
+        runStats: this.runStats,
+        time: this.time,
+      });
     }
   }
 
@@ -297,11 +401,18 @@ export class Game {
       if (this.collected.has(key)) continue;
       if (ch === CELL.COIN && s.y < 0.9) {
         this.collected.add(key); this._collectedOrder.push(key);
-        this.runCoins++; sfx.coin();
+        this.runCoins += this.flow;
+        this.runStats.coins += this.flow;
+        this._styleEvent();
+        sfx.coin();
         this._burst(lane, 0.5, row + 0.5, '#ffd24a', 6);
       } else if (ch === CELL.COIN_AIR && Math.abs(s.y - 1.15) < 0.55) {
         this.collected.add(key); this._collectedOrder.push(key);
-        this.runCoins++; sfx.coin();
+        this.runCoins += this.flow;
+        this.runStats.coins += this.flow;
+        this.runStats.airCoins++;
+        this._styleEvent();
+        sfx.coin();
         this._burst(lane, 1.15, row + 0.5, '#ffd24a', 6);
       } else if (ch === CELL.AMMO && s.y < 0.9) {
         this.collected.add(key); this._collectedOrder.push(key);
@@ -336,7 +447,10 @@ export class Game {
         if (ch === CELL.DESTRUCTIBLE && !this.destroyed.has(key)) {
           this.destroyed.add(key);
           this._destroyedOrder.push(key);
-          this.runCoins += WEAPON.destroyReward;
+          this.runCoins += WEAPON.destroyReward * this.flow;
+          this.runStats.coins += WEAPON.destroyReward * this.flow;
+          this.runStats.barriers++;
+          this._styleEvent();
           sfx.explode();
           this.shake = Math.max(this.shake, 0.35);
           this._burst(lane, 0.6, row + 0.5, '#ff9500', 14);
@@ -355,6 +469,7 @@ export class Game {
     if (this.state !== 'running' || this.slowmoLeft > 0) return false;
     this.slowmoLeft = SLOWMO.duration;
     this._timeScaleTarget = SLOWMO.timeScale;
+    this.runStats.slowmos++;
     sfx.slowmo();
     return true;
   }
@@ -366,6 +481,8 @@ export class Game {
     this._crashTimer = 0.9;
     this._timeScaleTarget = 0.25;
     this.slowmoLeft = 0;
+    this.flow = 1;
+    this.flowEvents = 0;
     this.shake = 1;
     this.shipVisible = false;
     this.projectiles.length = 0;
@@ -434,6 +551,10 @@ export class Game {
       this.runCoins = snap.runCoins;
       this.ammo = snap.ammo;
       this.time = snap.t;
+      this.runStats.revives++;
+      // the echo recording is rewritten from here — but echoClock is NOT
+      // restored: your rival echo keeps flying while you recover
+      this.recorder?.truncateAfterZ(snap.z);
       this.history.length = anim.toIdx + 1;
       this._rewindAnim = null;
       this.rewindGhosts = null;

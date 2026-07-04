@@ -6,6 +6,9 @@
 // items, finish gate, ship shadow, ship, particles, FX overlays.
 
 import { CAMERA, CELL, BLOCK_HEIGHTS, TRACK_LANES } from './config.js';
+import { equippedShip, equippedTrail } from './cosmetics.js';
+
+const ECHO_STYLE = { color: '#54f0ff', flame: '#a0f4ff', wing: 1.0, nose: 1.0 };
 
 const HAZARD_A = '#ff5030';
 const HAZARD_B = '#7a1400';
@@ -195,6 +198,29 @@ export class Renderer {
     }
 
     if (!game.attract) {
+      // ---- echo ghost: your past run racing beside you ----
+      if (game.echoPos) {
+        this._ship(ctx, px, py, game.echoPos, theme, f, camZ, t, 0.35, game, ECHO_STYLE);
+      }
+
+      // ---- engine trail ribbon ----
+      if (game.trailPoints && game.trailPoints.length > 2) {
+        const trail = equippedTrail();
+        for (let i = 0; i < game.trailPoints.length - 1; i++) {
+          const p = game.trailPoints[i];
+          if (p.z - camZ < 0.6) continue;
+          const a = (i / game.trailPoints.length) * 0.35;
+          const s = f / (p.z - camZ);
+          ctx.globalAlpha = a;
+          ctx.fillStyle = trail.color;
+          const r = s * 0.05 * (i / game.trailPoints.length + 0.3);
+          ctx.beginPath();
+          ctx.arc(px(p.x, p.z), py(p.y, p.z), Math.max(0.5, r), 0, 6.29);
+          ctx.fill();
+        }
+        ctx.globalAlpha = 1;
+      }
+
       // ---- ship shadow ----
       const g = game.groundInfoForRender;
       if (g && g.height > -100) {
@@ -218,7 +244,7 @@ export class Renderer {
       }
 
       // ---- ship ----
-      if (game.shipVisible) this._ship(ctx, px, py, ship, theme, f, camZ, t, 1, game);
+      if (game.shipVisible) this._ship(ctx, px, py, ship, theme, f, camZ, t, 1, game, equippedShip());
     }
 
     // ---- particles ----
@@ -242,6 +268,21 @@ export class Renderer {
       v.addColorStop(1, `rgba(40,190,255,${0.30 * game.slowmoVisual})`);
       ctx.fillStyle = v;
       ctx.fillRect(0, 0, w, h);
+    }
+    if (game.flow > 1 && game.state === 'running') {
+      // flow combo: screen-edge glow that intensifies per tier
+      const k = (game.flow - 1) / 4;
+      const gold = `rgba(255,210,74,${0.06 + 0.14 * k})`;
+      const edge = h * (0.05 + 0.05 * k);
+      for (const [x0, y0, x1, y1] of [
+        [0, 0, 0, edge], [0, h, 0, h - edge], // top, bottom
+      ]) {
+        const gr = ctx.createLinearGradient(x0, y0, x1, y1);
+        gr.addColorStop(0, gold);
+        gr.addColorStop(1, 'transparent');
+        ctx.fillStyle = gr;
+        ctx.fillRect(0, Math.min(y0, y1), w, edge);
+      }
     }
     if (game.rewindVisual > 0.01) {
       ctx.fillStyle = `rgba(200,230,255,${0.10 * game.rewindVisual})`;
@@ -406,11 +447,14 @@ export class Renderer {
     ctx.restore();
   }
 
-  _ship(ctx, px, py, ship, theme, f, camZ, t, alpha, game) {
+  _ship(ctx, px, py, ship, theme, f, camZ, t, alpha, game, def) {
     const sz = ship.z;
     if (sz - camZ < 0.4) return;
     const sx = px(ship.x, sz), sy = py(ship.y + 0.12, sz);
     const u = (f / (sz - camZ)) * 0.5; // px per world-unit at ship depth, halved for sprite scale
+    const hue = (def && def.color) || theme.glow;   // 'adaptive' ships use the theme
+    const wing = (def && def.wing) || 1;
+    const nose = (def && def.nose) || 1;
     ctx.save();
     ctx.globalAlpha = alpha;
     ctx.translate(sx, sy);
@@ -419,9 +463,10 @@ export class Renderer {
     // engine flame
     const flick = 0.75 + 0.25 * Math.sin(t * 40) + (game.ship.speedMul > 1.05 ? 0.5 : 0);
     const flameLen = u * (0.55 + 0.25 * flick);
+    const flameColor = (def && def.flame) || '#57c8ff';
     const fg = ctx.createLinearGradient(0, u * 0.3, 0, u * 0.3 + flameLen);
     fg.addColorStop(0, '#bff4ff');
-    fg.addColorStop(0.4, '#57c8ff');
+    fg.addColorStop(0.4, flameColor);
     fg.addColorStop(1, 'transparent');
     ctx.fillStyle = fg;
     ctx.beginPath();
@@ -432,22 +477,22 @@ export class Renderer {
     ctx.fill();
 
     // body
-    ctx.shadowColor = theme.glow;
+    ctx.shadowColor = hue;
     ctx.shadowBlur = 12;
     const body = ctx.createLinearGradient(0, -u * 0.5, 0, u * 0.35);
     body.addColorStop(0, '#f2f6ff');
-    body.addColorStop(0.45, theme.glow);
-    body.addColorStop(1, this._shade(theme.glow, 0.45));
+    body.addColorStop(0.45, hue);
+    body.addColorStop(1, this._shade(hue, 0.45));
     ctx.fillStyle = body;
     ctx.beginPath();
-    ctx.moveTo(0, -u * 0.52);                 // nose
+    ctx.moveTo(0, -u * 0.52 * nose);          // nose
     ctx.lineTo(u * 0.14, -u * 0.10);
-    ctx.lineTo(u * 0.42, u * 0.26);           // right wing tip
+    ctx.lineTo(u * 0.42 * wing, u * 0.26);    // right wing tip
     ctx.lineTo(u * 0.16, u * 0.20);
     ctx.lineTo(u * 0.10, u * 0.30);           // right tail
     ctx.lineTo(-u * 0.10, u * 0.30);          // left tail
     ctx.lineTo(-u * 0.16, u * 0.20);
-    ctx.lineTo(-u * 0.42, u * 0.26);          // left wing tip
+    ctx.lineTo(-u * 0.42 * wing, u * 0.26);   // left wing tip
     ctx.lineTo(-u * 0.14, -u * 0.10);
     ctx.closePath();
     ctx.fill();
