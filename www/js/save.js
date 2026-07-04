@@ -37,6 +37,15 @@ function freshSave() {
     echoLru: 0,
     notifAsked: false,
     reviewShown: false,
+
+    // v4
+    flipControls: false,        // left-handed mode: swap fire and jump sides
+    hints: {},                  // one-time mechanic hint toasts shown
+    xp: 0,
+    rank: 1,
+    wheel: { day: null, spins: 0 },
+    firstWinDay: null,          // first completed run each day pays double
+    starChestsClaimed: [],      // star-chest thresholds already claimed
   };
 }
 
@@ -107,12 +116,14 @@ export const save = {
   unlockThrough(levelNumber) {
     if (levelNumber > data.unlocked) { data.unlocked = levelNumber; persist(); }
   },
-  recordBest(index, pct, coins) {
-    const prev = data.best[index];
-    if (!prev || pct > prev.pct || (pct === prev.pct && coins > prev.coins)) {
-      data.best[index] = { pct: Math.round(pct * 100) / 100, coins };
-      persist();
-    }
+  recordBest(index, pct, coins, stars = 0) {
+    const prev = data.best[index] || { pct: 0, coins: 0, stars: 0 };
+    data.best[index] = {
+      pct: Math.max(prev.pct, Math.round(pct * 100) / 100),
+      coins: Math.max(prev.coins, coins),
+      stars: Math.max(prev.stars || 0, stars),
+    };
+    persist();
   },
 
   // stats + achievements
@@ -154,6 +165,8 @@ export const save = {
 
   setAdsRemoved(v) { data.adsRemoved = v; persist(); },
   setSound(v) { data.sound = v; persist(); },
+  setFlipControls(v) { data.flipControls = v; persist(); },
+  markHint(id) { data.hints[id] = true; persist(); },
 
   reset() { data = freshSave(); persist(); },
 };

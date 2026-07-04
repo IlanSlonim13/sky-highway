@@ -465,6 +465,96 @@ h2.gold { color: var(--gold); text-shadow: 0 0 14px var(--gold); }
 }
 .sim-ad-count { position: absolute; top: 16px; left: 16px; color: #8f84b3; font-weight: bold; }
 
+/* ---------- v4: flipped controls (left-handed mode) ---------- */
+#hud.flipped .hud-bottom { flex-direction: row-reverse; }
+
+/* jump charge ring while holding */
+.hud-action.jump { position: relative; }
+.hud-action.jump.charging {
+  background:
+    conic-gradient(var(--glow2) calc(var(--charge, 0) * 360deg), rgba(20, 12, 45, 0.65) 0deg);
+}
+
+/* ---------- v4: rank chip ---------- */
+.rank-chip {
+  width: min(280px, 70vw);
+  margin: -4vh 0 3vh;
+  text-align: center;
+}
+#rank-label { font-size: 0.68rem; letter-spacing: 0.18em; color: var(--glow2); text-shadow: 0 0 8px var(--glow2); }
+.rank-bar {
+  height: 6px; margin-top: 5px;
+  background: rgba(20, 12, 45, 0.8);
+  border: 1px solid rgba(84, 240, 255, 0.4);
+  border-radius: 4px; overflow: hidden;
+}
+#rank-fill { height: 100%; width: 0%; background: linear-gradient(90deg, var(--glow), var(--glow2)); }
+
+/* ---------- v4: prize wheel ---------- */
+.wheel-wrap { position: relative; margin: 10px 0 16px; }
+.wheel-disc {
+  width: min(240px, 60vw); height: min(240px, 60vw);
+  border-radius: 50%;
+  border: 4px solid var(--gold);
+  box-shadow: 0 0 24px rgba(255, 210, 74, 0.4), inset 0 0 30px rgba(0, 0, 0, 0.5);
+  transition: transform 3s cubic-bezier(0.15, 0.9, 0.28, 1);
+  position: relative;
+  overflow: hidden;
+}
+.wheel-slice-label {
+  position: absolute; left: 50%; top: 50%;
+  transform-origin: 0 0;
+  font-size: 0.62rem; font-weight: bold; color: #fff;
+  text-shadow: 0 1px 2px #000;
+  white-space: nowrap;
+}
+.wheel-pointer {
+  position: absolute; top: -14px; left: 50%; transform: translateX(-50%);
+  color: var(--gold); font-size: 1.4rem;
+  text-shadow: 0 0 10px var(--gold);
+}
+.free-badge {
+  background: var(--gold); color: #051020;
+  border-radius: 10px; padding: 1px 7px;
+  font-size: 0.6rem; font-weight: bold; margin-left: 6px;
+  animation: pulse 0.9s infinite alternate;
+}
+
+/* ---------- v4: stars ---------- */
+.stars-row { font-size: 1.6rem; color: var(--gold); text-shadow: 0 0 12px var(--gold); letter-spacing: 0.2em; margin-bottom: 8px; }
+.level-cell .stars { font-size: 0.62rem; color: var(--gold); font-weight: normal; margin-top: 2px; }
+.star-strip {
+  display: flex; gap: 6px; align-items: center;
+  width: 100%; max-width: 560px;
+  padding: 2px 4px 6px;
+  overflow-x: auto;
+}
+.star-total { font-size: 0.8rem; color: var(--gold); white-space: nowrap; padding-right: 4px; }
+.star-chest {
+  font: inherit; font-size: 0.66rem; font-weight: bold;
+  color: #8f84b3; background: rgba(30, 22, 60, 0.7);
+  border: 1px solid #3a3358; border-radius: 10px;
+  min-height: 38px; padding: 4px 10px;
+  white-space: nowrap;
+}
+.star-chest.ready { color: #051020; background: var(--gold); border-color: var(--gold); cursor: pointer; animation: pulse 0.9s infinite alternate; }
+.star-chest.claimed { opacity: 0.45; }
+
+/* ---------- v4: daily deal ---------- */
+.deal-card {
+  display: flex; align-items: center; gap: 12px;
+  background: linear-gradient(90deg, rgba(130, 95, 20, 0.5), rgba(60, 40, 10, 0.5));
+  border: 2px solid var(--gold);
+  border-radius: 14px;
+  padding: 12px 14px;
+  margin: 4px 0 10px;
+  box-shadow: 0 0 16px rgba(255, 210, 74, 0.3);
+}
+.deal-card .old-price { text-decoration: line-through; opacity: 0.6; margin-right: 6px; }
+.deal-tag { font-size: 0.6rem; letter-spacing: 0.2em; color: var(--gold); }
+.small-print { font-size: 0.7rem; margin: 10px 0; }
+.small-print a { color: var(--glow2); }
+
 /* ---------- toasts ---------- */
 .toast {
   position: fixed;

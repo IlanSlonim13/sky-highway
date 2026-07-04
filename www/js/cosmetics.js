@@ -12,6 +12,7 @@ export const SHIPS = [
   { id: 'pulse', name: 'Pulse', desc: 'All engine, no manners.', color: '#54f0ff', wing: 1.35, nose: 0.9, unlock: { type: 'coins', price: 1200 } },
   { id: 'ember', name: 'Ember', desc: 'Forged by a 7-day streak.', color: '#ff6a00', wing: 1.1, nose: 1.15, unlock: { type: 'achievement', id: 'streak7', label: '7-day streak' } },
   { id: 'bolt', name: 'Bolt', desc: 'Starter Pack exclusive.', color: '#ffd24a', wing: 1.05, nose: 1.25, unlock: { type: 'starter', label: 'Starter Pack' } },
+  { id: 'meridian', name: 'Meridian', desc: 'Awarded at pilot rank 15.', color: '#7dff9a', wing: 1.15, nose: 1.05, unlock: { type: 'rank', rank: 15, label: 'Rank 15' } },
   { id: 'aurora', name: 'Aurora', desc: 'Premium exclusive. Painted with dawn.', color: '#b06bff', flame: '#ffd24a', wing: 1.2, nose: 1.1, unlock: { type: 'premium', label: 'Premium' } },
 ];
 
@@ -21,6 +22,8 @@ export const TRAILS = [
   { id: 'emerald', name: 'Emerald', color: '#6bffb8', unlock: { type: 'coins', price: 200 } },
   { id: 'blaze', name: 'Blaze', color: '#ff9d5c', unlock: { type: 'coins', price: 300 } },
   { id: 'violet', name: 'Violet', color: '#c86bff', unlock: { type: 'coins', price: 300 } },
+  { id: 'starlight', name: 'Starlight', color: '#e8f0ff', unlock: { type: 'rank', rank: 30, label: 'Rank 30' } },
+  { id: 'aurum', name: 'Aurum', color: '#ffe9a0', unlock: { type: 'stars', stars: 500, label: '500 ★' } },
   { id: 'gold', name: 'Gold', color: '#ffd24a', unlock: { type: 'premium', label: 'Premium' } },
 ];
 

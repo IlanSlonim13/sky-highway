@@ -185,7 +185,18 @@ export const MISSION_TABLE = [
   { id: 'flow5', desc: 'Reach FLOW ×5', stat: 'maxFlow', kind: 'max', target: 5, reward: 45 },
   { id: 'slowmo2', desc: 'Bend time twice (slow-mo)', stat: 'slowmos', kind: 'sum', target: 2, reward: 30 },
   { id: 'revive1', desc: 'Come back from a crash', stat: 'revives', kind: 'sum', target: 1, reward: 35 },
+  { id: 'rings3', desc: 'Thread 3 rings', stat: 'rings', kind: 'sum', target: 3, reward: 40 },
 ];
+
+// ---------------------------------------------------------------------------
+// First victory of the day — the first completed run each day pays double
+// ---------------------------------------------------------------------------
+export function isFirstWinToday() {
+  return save.get().firstWinDay !== todayKey();
+}
+export function markWinToday() {
+  save.update((d) => { d.firstWinDay = todayKey(); });
+}
 
 export function todaysMissions() {
   ensureDailyState();

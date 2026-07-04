@@ -13,6 +13,8 @@ import { ECONOMY } from './config.js';
 import { save } from './save.js';
 import { setAdsRemoved as adsSetRemoved, hideBanner } from './ads.js';
 import { grantShip, grantTrail } from './cosmetics.js';
+import { mulberry32 } from './levels.js';
+import { todayKey } from './daily.js';
 
 export const CATALOG = {
   coinItems: [
@@ -69,9 +71,22 @@ function grantStarter() {
 // piggy bank: sold separately from the catalog rows (its card shows the fill level)
 export const PIGGY_IAP = { id: 'piggy', icon: '🐷', name: 'Crack the Piggy Bank', price: '$1.99' };
 
+// ---------------------------------------------------------------------------
+// Daily Deal — one coin item at 50% off, rotating with the date (no backend)
+// ---------------------------------------------------------------------------
+export function todaysDeal() {
+  const n = Number(todayKey().replace(/-/g, ''));
+  const rng = mulberry32((n ^ 0xDEA1) >>> 0);
+  const item = CATALOG.coinItems[Math.floor(rng() * CATALOG.coinItems.length)];
+  return { ...item, dealPrice: Math.round(item.price / 2) };
+}
+
 export function buyWithCoins(id) {
   const item = CATALOG.coinItems.find((i) => i.id === id);
-  if (!item || !save.spendCoins(item.price)) return false;
+  if (!item) return false;
+  const deal = todaysDeal();
+  const price = deal.id === id ? deal.dealPrice : item.price;
+  if (!save.spendCoins(price)) return false;
   item.grant();
   return true;
 }

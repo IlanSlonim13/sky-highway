@@ -137,5 +137,54 @@ for (let i = 0; i < 15; i++) {
 check('echo LRU caps at 12', Object.keys(save.get().echoes).length === 12);
 check('oldest evicted', !save.get().echoes.c0 && !!save.get().echoes.c14);
 
+// ---------------------------------------------------------------- pilot XP
+const pilot = await import('../www/js/pilot.js');
+const { ownsShip } = await import('../www/js/cosmetics.js');
+
+check('xp curve monotonic', pilot.xpNeeded(2) > pilot.xpNeeded(1) && pilot.xpNeeded(30) > pilot.xpNeeded(10));
+check('xpForRun pays failed runs', pilot.xpForRun({ distance: 100, coins: 0, completed: false }) > 0);
+check('flow multiplies xp', pilot.xpForRun({ distance: 100, coins: 20, completed: true, maxFlow: 5 }) >
+  pilot.xpForRun({ distance: 100, coins: 20, completed: true, maxFlow: 1 }));
+
+const coinsBeforeRank = save.get().coins;
+let r1 = pilot.grantXp(pilot.xpNeeded(1)); // exactly one rank-up
+check('rank-up detected + paid', r1.rankUps.length === 1 && r1.rankUps[0].rank === 2 &&
+  save.get().coins > coinsBeforeRank, JSON.stringify(r1.rankUps));
+// grind to rank 15 -> meridian ship
+let total = 0;
+for (let rk = save.get().rank; rk < 15; rk++) total += pilot.xpNeeded(rk);
+const r15 = pilot.grantXp(total + 10);
+check('rank 15 grants Meridian ship', save.get().rank >= 15 && ownsShip('meridian'),
+  `rank=${save.get().rank} ups=${r15.rankUps.length}`);
+check('rank progress shape', (() => { const p = pilot.rankProgress(); return p.fill >= 0 && p.fill <= 1 && p.title.length > 0; })());
+
+// ---------------------------------------------------------------- daily deal
+const shop = await import('../www/js/store.js');
+daily.setDayOverride('2026-07-21');
+const dealA = shop.todaysDeal(), dealB = shop.todaysDeal();
+check('daily deal deterministic', dealA.id === dealB.id && dealA.dealPrice === Math.round(dealA.price / 2), JSON.stringify({ id: dealA.id, p: dealA.price, dp: dealA.dealPrice }));
+daily.setDayOverride('2026-07-23');
+const dealC = shop.todaysDeal();
+daily.setDayOverride('2026-07-21');
+save.addCoins(1000);
+const before = save.get().coins;
+check('deal price charged (50% off)', shop.buyWithCoins(dealA.id) && save.get().coins === before - dealA.dealPrice,
+  `${before} -> ${save.get().coins} (deal ◆${dealA.dealPrice})`);
+
+// ---------------------------------------------------------------- first win of the day
+daily.setDayOverride('2026-07-25');
+check('first win available', daily.isFirstWinToday());
+daily.markWinToday();
+check('second win same day not doubled', !daily.isFirstWinToday());
+daily.setDayOverride('2026-07-26');
+check('next day resets first win', daily.isFirstWinToday());
+
+// ---------------------------------------------------------------- stars in recordBest
+save.recordBest(7, 100, 12, 2);
+save.recordBest(7, 100, 8, 1);  // worse stars must not downgrade
+check('stars keep their max', save.get().best[7].stars === 2 && save.get().best[7].coins === 12);
+save.recordBest(7, 100, 20, 3);
+check('stars upgrade to 3', save.get().best[7].stars === 3);
+
 console.log(`\n${failures === 0 ? 'ALL PASS' : failures + ' FAILURES'}`);
 process.exit(failures ? 1 : 0);

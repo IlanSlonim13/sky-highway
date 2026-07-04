@@ -1,7 +1,7 @@
 // Sky Highway — bootstrap and UI wiring (v2: modes, daily, endless, echoes,
 // missions, hangar, piggy bank, premium).
 
-import { ECONOMY, ADS, MAX_REVIVES_PER_RUN, PIGGY, ECHO } from './config.js';
+import { ECONOMY, ADS, MAX_REVIVES_PER_RUN, PIGGY, ECHO, APP_VERSION, PHYSICS } from './config.js';
 import { getLevel, LEVEL_COUNT, getDailyLevel, createEndlessTrack } from './levels.js';
 import { save } from './save.js';
 import * as audio from './audio.js';
@@ -10,10 +10,11 @@ import { Input } from './input.js';
 import { Game } from './game.js';
 import { Renderer } from './renderer.js';
 import * as ads from './ads.js';
-import { CATALOG, PIGGY_IAP, buyWithCoins, purchaseIAP, restorePurchases } from './store.js';
+import { CATALOG, PIGGY_IAP, buyWithCoins, purchaseIAP, restorePurchases, todaysDeal } from './store.js';
 import * as daily from './daily.js';
 import { EchoPlayer, echoKey, loadBestEcho, storeBestEcho } from './echo.js';
-import { SHIPS, TRAILS, ownsShip, ownsTrail, buyShip, buyTrail, equipShip, equipTrail, grantShip } from './cosmetics.js';
+import { SHIPS, TRAILS, ownsShip, ownsTrail, buyShip, buyTrail, equipShip, equipTrail, grantShip, grantTrail } from './cosmetics.js';
+import { grantXp, xpForRun, rankProgress } from './pilot.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -51,6 +52,7 @@ const ACHIEVEMENTS = [
   { id: 'echo10', name: 'Time Rival', test: (s) => s.stats.echoBeats >= 10, coins: 200 },
   { id: 'dist1000', name: 'Deep Space', test: (s) => s.stats.bestDistance >= 1000, coins: 200 },
   { id: 'flowmax', name: 'Flow State', test: (s) => s.stats.maxFlow >= 5, coins: 100 },
+  { id: 'rings25', name: 'Ringmaster', test: (s) => (s.stats.rings || 0) >= 25, coins: 150 },
 ];
 
 function checkAchievements() {
@@ -78,7 +80,7 @@ function toast(text) {
 // Screen management: one base screen + at most one overlay.
 // ---------------------------------------------------------------------------
 const BASE_SCREENS = ['screen-menu', 'screen-levels', 'screen-store', 'screen-hangar', 'hud'];
-const OVERLAYS = ['screen-pause', 'screen-revive', 'screen-complete', 'screen-failed', 'screen-daily'];
+const OVERLAYS = ['screen-pause', 'screen-revive', 'screen-complete', 'screen-failed', 'screen-daily', 'screen-settings', 'screen-wheel'];
 
 function showBase(id) {
   for (const s of BASE_SCREENS) $(s).classList.toggle('visible', s === id);
@@ -142,6 +144,14 @@ function refreshMenu() {
   $('piggy-chip').hidden = d.bank <= 0;
   $('piggy-fill').textContent = d.bank;
   $('piggy-cap').textContent = PIGGY.cap;
+
+  // pilot rank chip
+  const rp = rankProgress();
+  $('rank-label').textContent = `RANK ${rp.rank} · ${rp.title.toUpperCase()}`;
+  $('rank-fill').style.width = `${Math.round(rp.fill * 100)}%`;
+
+  // prize wheel free badge
+  $('wheel-free').hidden = !freeSpinAvailable();
 }
 
 function countdownText() {
@@ -176,9 +186,20 @@ function launch(level) {
   game.start();
 }
 
+const MECHANIC_HINTS = {
+  1: ['hold', 'TIP: HOLD ▲ to jump higher and farther'],
+  2: ['hurdle', 'TIP: energy fences are too tall for a tap — HOLD the jump'],
+  5: ['debris', "TIP: don't hold under debris — tap-hop or drive beneath it"],
+};
+
 function playCampaign(index) {
   currentLevelIndex = index;
   launch(getLevel(index));
+  const hint = MECHANIC_HINTS[index];
+  if (hint && !save.get().hints[hint[0]]) {
+    save.markHint(hint[0]);
+    toast(hint[1]);
+  }
 }
 
 function playDaily() {
@@ -211,6 +232,7 @@ function applyRunStats(completed) {
   daily.missionEvent('slowmos', rs.slowmos);
   daily.missionEvent('revives', rs.revives);
   daily.missionEvent('maxFlow', rs.maxFlow);
+  daily.missionEvent('rings', rs.rings);
   if (game.mode === 'campaign' && completed) daily.missionEvent('levels', 1);
   if (game.mode === 'endless') daily.missionEvent('runDistance', game.distance);
   if (game.beatEcho) daily.missionEvent('echoBeats', 1);
@@ -221,10 +243,22 @@ function applyRunStats(completed) {
     d.stats.jumps += rs.jumps;
     d.stats.revives += rs.revives;
     d.stats.maxFlow = Math.max(d.stats.maxFlow, rs.maxFlow);
+    d.stats.rings = (d.stats.rings || 0) + rs.rings;
     if (completed) d.stats.levelsCompleted += game.mode === 'campaign' ? 1 : 0;
     if (game.beatEcho) d.stats.echoBeats++;
     if (game.mode === 'endless') d.stats.bestDistance = Math.max(d.stats.bestDistance, game.distance);
   });
+
+  // pilot XP: every run pays progress, even a failed one
+  const { rankUps } = grantXp(xpForRun({
+    distance: game.distance,
+    coins: rs.coins,
+    completed,
+    maxFlow: rs.maxFlow,
+  }));
+  for (const up of rankUps) {
+    toast(`🎖 RANK ${up.rank} — ${up.title.toUpperCase()} · +◆${up.coins}${up.extra ? ' · ' + up.extra : ''}`);
+  }
 }
 
 function keepEcho(completed) {
@@ -296,6 +330,21 @@ game.events.onComplete = async ({ coins, beatEcho }) => {
   let total = coins;
   if (beatEcho) { total += ECHO.beatBonus; breakdown.push(`👻 echo beaten +◆${ECHO.beatBonus}`); }
 
+  // 3-star rating (campaign) + first victory of the day
+  let stars = 0;
+  if (game.mode === 'campaign') {
+    stars = 1 +
+      (coins >= 0.6 * countLevelCoins(game.level) ? 1 : 0) +
+      ((beatEcho || (!game.echoPlayer && game.revivesUsed === 0)) ? 1 : 0);
+    $('stars-row').hidden = false;
+    $('stars-row').textContent = '★'.repeat(stars) + '☆'.repeat(3 - stars);
+  } else {
+    $('stars-row').hidden = true;
+  }
+  const firstWin = daily.isFirstWinToday();
+  if (firstWin) daily.markWinToday();
+  $('firstwin-banner').hidden = !firstWin;
+
   if (game.mode === 'daily') {
     const medal = daily.medalFor(coins, countLevelCoins(game.level));
     const credit = daily.creditDailyCompletion(medal);
@@ -310,11 +359,12 @@ game.events.onComplete = async ({ coins, beatEcho }) => {
     total += bonus;
     $('complete-title').textContent = 'LEVEL COMPLETE!';
     breakdown.push(`◆ ${coins} collected + ◆ ${bonus} bonus`);
-    save.recordBest(currentLevelIndex, 100, coins);
+    save.recordBest(currentLevelIndex, 100, coins, stars);
     save.unlockThrough(Math.min(LEVEL_COUNT, currentLevelIndex + 2));
     $('btn-next').style.display = currentLevelIndex + 1 < LEVEL_COUNT ? '' : 'none';
   }
 
+  if (firstWin) { total *= 2; breakdown.push('☀ first victory ×2'); }
   grantRunCoins(total);
   $('echo-banner').hidden = !beatEcho;
   $('complete-stats').textContent = `${breakdown.join(' · ')} = ◆ ${total}`;
@@ -402,6 +452,7 @@ const CRASH_LINES = {
   wall: 'SMASHED INTO A BARRIER',
   burn: 'BURNED ON A HAZARD TILE',
   fall: 'LOST IN THE VOID',
+  debris: 'CLIPPED THE SPACE DEBRIS',
 };
 
 function openReviveModal() {
@@ -536,7 +587,10 @@ $('btn-saver-coins').addEventListener('click', () => {
 // ---------------------------------------------------------------------------
 // HUD
 // ---------------------------------------------------------------------------
-$('btn-jump').addEventListener('pointerdown', (e) => { e.stopPropagation(); input.queueJump(); });
+$('btn-jump').addEventListener('pointerdown', (e) => { e.stopPropagation(); input.pressJump(); });
+for (const ev of ['pointerup', 'pointercancel', 'pointerleave']) {
+  $('btn-jump').addEventListener(ev, () => input.releaseJump());
+}
 $('btn-fire').addEventListener('pointerdown', (e) => { e.stopPropagation(); game.shoot(); });
 $('btn-slowmo').addEventListener('pointerdown', (e) => {
   e.stopPropagation();
@@ -580,6 +634,11 @@ function syncHud() {
   const chip = $('flow-chip');
   chip.textContent = `×${game.flow}`;
   chip.classList.toggle('hot', game.flow > 1);
+  // hold-to-jump charge ring on the ▲ button
+  const jumpBtn = $('btn-jump');
+  const charging = !game.ship.grounded && input.jumpHeld && game._sustain;
+  jumpBtn.classList.toggle('charging', charging);
+  if (charging) jumpBtn.style.setProperty('--charge', Math.min(1, game._holdT / PHYSICS.maxJumpHoldS));
 }
 
 // ---------------------------------------------------------------------------
@@ -595,8 +654,51 @@ $('btn-failed-menu').addEventListener('click', () => { sfx.click(); showBase('sc
 // Level select
 // ---------------------------------------------------------------------------
 const SECTOR_SIZE = 100;
+const STAR_CHESTS = [
+  { stars: 50, coins: 100 }, { stars: 150, coins: 200 }, { stars: 300, coins: 300 },
+  { stars: 500, coins: 500, trail: 'aurum' }, { stars: 750, coins: 800 }, { stars: 1000, coins: 1200 },
+];
+
+function totalStars() {
+  const best = save.get().best;
+  return Object.values(best).reduce((s, b) => s + (b.stars || 0), 0);
+}
+
+function buildStarStrip() {
+  const strip = $('star-strip');
+  strip.innerHTML = '';
+  const total = totalStars();
+  const label = document.createElement('span');
+  label.className = 'star-total';
+  label.textContent = `★ ${total}`;
+  strip.appendChild(label);
+  const claimed = save.get().starChestsClaimed;
+  for (const chest of STAR_CHESTS) {
+    const btn = document.createElement('button');
+    const done = claimed.includes(chest.stars);
+    const ready = !done && total >= chest.stars;
+    btn.className = 'star-chest' + (done ? ' claimed' : ready ? ' ready' : '');
+    btn.textContent = done ? `✓ ${chest.stars}★` : `🎁 ${chest.stars}★ · ◆${chest.coins}${chest.trail ? ' +trail' : ''}`;
+    if (ready) {
+      btn.addEventListener('click', () => {
+        save.update((d) => { d.starChestsClaimed.push(chest.stars); });
+        const c = save.addCoins(chest.coins);
+        save.feedBank(c, PIGGY.cap, PIGGY.rate);
+        if (chest.trail) grantTrail(chest.trail);
+        sfx.win();
+        toast(`🎁 star chest: +◆${chest.coins}${chest.trail ? ' · trail AURUM' : ''}`);
+        refreshWallets();
+        buildStarStrip();
+      });
+    } else {
+      btn.disabled = true;
+    }
+    strip.appendChild(btn);
+  }
+}
 
 function buildLevelGrid(sector) {
+  buildStarStrip();
   const { unlocked, best } = save.get();
   const sectors = Math.ceil(LEVEL_COUNT / SECTOR_SIZE);
   if (sector === undefined) sector = Math.min(sectors - 1, Math.floor((unlocked - 1) / SECTOR_SIZE));
@@ -623,7 +725,10 @@ function buildLevelGrid(sector) {
       cell.classList.add('locked');
       cell.innerHTML = `🔒`;
     } else {
-      cell.innerHTML = `${i + 1}${b ? `<span class="best">${Math.round(b.pct)}%</span>` : ''}`;
+      const badge = b && b.stars > 0
+        ? `<span class="stars">${'★'.repeat(b.stars)}</span>`
+        : b ? `<span class="best">${Math.round(b.pct)}%</span>` : '';
+      cell.innerHTML = `${i + 1}${badge}`;
       if (b && b.pct >= 100) cell.classList.add('done');
       cell.addEventListener('click', () => { sfx.click(); playCampaign(i); });
     }
@@ -726,7 +831,21 @@ function buildStore() {
 
   const coinWrap = $('store-coin-items');
   coinWrap.innerHTML = '';
+  const deal = todaysDeal();
+  const dealCard = document.createElement('div');
+  dealCard.className = 'deal-card';
+  dealCard.innerHTML = `
+    <div class="ico">${deal.icon}</div>
+    <div class="info"><div class="deal-tag">⚡ TODAY ONLY · ends in ${countdownText()}</div>
+    <div class="name">${deal.name}</div><div class="desc">${deal.desc}</div></div>
+    <button class="buy gold"><span class="old-price">◆${deal.price}</span>◆${deal.dealPrice}</button>`;
+  dealCard.querySelector('.buy').addEventListener('click', () => {
+    if (buyWithCoins(deal.id)) { sfx.coin(); refreshWallets(); buildStore(); }
+    else sfx.click();
+  });
+  coinWrap.appendChild(dealCard);
   for (const item of CATALOG.coinItems) {
+    if (item.id === deal.id) continue; // shown as the deal card above
     coinWrap.appendChild(storeRow(item, `◆ ${item.price}`, () => {
       if (buyWithCoins(item.id)) { sfx.coin(); refreshWallets(); buildStore(); }
       else sfx.click();
@@ -813,6 +932,108 @@ function maybeAskReview() {
 }
 
 // ---------------------------------------------------------------------------
+// Prize wheel — one free spin a day, one more behind a rewarded ad
+// ---------------------------------------------------------------------------
+const WHEEL_SLICES = [
+  { coins: 20, label: '◆20', color: '#3a2a68' },
+  { coins: 40, label: '◆40', color: '#252054' },
+  { ammo: 6, label: '🔸×6', color: '#3a2a68' },
+  { coins: 80, label: '◆80', color: '#252054' },
+  { slowmo: 1, label: '🐌×1', color: '#3a2a68' },
+  { coins: 150, label: '◆150', color: '#252054' },
+  { rewind: 1, label: '⏪×1', color: '#3a2a68' },
+  { coins: 400, label: '◆400!', color: '#7a5a10' },
+];
+const WHEEL_WEIGHTS = [22, 18, 14, 12, 10, 8, 10, 6];
+let wheelSpinning = false;
+let wheelRotation = 0;
+
+function freeSpinAvailable() {
+  const w = save.get().wheel;
+  return w.day !== daily.todayKey() || w.spins === 0;
+}
+function adSpinAvailable() {
+  const w = save.get().wheel;
+  return w.day === daily.todayKey() && w.spins === 1 && ads.adsAvailable();
+}
+
+function buildWheelDisc() {
+  const disc = $('wheel-disc');
+  const n = WHEEL_SLICES.length;
+  const seg = 360 / n;
+  disc.style.background = `conic-gradient(${WHEEL_SLICES
+    .map((s, i) => `${s.color} ${i * seg}deg ${(i + 1) * seg}deg`).join(', ')})`;
+  disc.querySelectorAll('.wheel-slice-label').forEach((el) => el.remove());
+  WHEEL_SLICES.forEach((s, i) => {
+    const el = document.createElement('span');
+    el.className = 'wheel-slice-label';
+    el.textContent = s.label;
+    el.style.transform = `rotate(${i * seg + seg / 2 - 90}deg) translate(28%, -50%)`;
+    disc.appendChild(el);
+  });
+}
+
+function openWheel() {
+  daily.ensureDailyState();
+  save.update((d) => {
+    if (d.wheel.day !== daily.todayKey()) { d.wheel.day = daily.todayKey(); d.wheel.spins = 0; }
+  });
+  buildWheelDisc();
+  syncWheelButtons();
+  showOverlay('screen-wheel');
+}
+
+function syncWheelButtons() {
+  $('btn-spin').style.display = freeSpinAvailable() ? '' : 'none';
+  $('btn-spin-ad').hidden = !adSpinAvailable();
+  $('wheel-note').textContent = freeSpinAvailable()
+    ? 'one free spin every day'
+    : adSpinAvailable() ? 'watch an ad for one more spin' : `next free spin in ${countdownText()}`;
+}
+
+function pickWheelSlice(forced) {
+  if (forced !== undefined) return forced;
+  const total = WHEEL_WEIGHTS.reduce((a, b) => a + b, 0);
+  let roll = Math.random() * total;
+  for (let i = 0; i < WHEEL_WEIGHTS.length; i++) {
+    roll -= WHEEL_WEIGHTS[i];
+    if (roll <= 0) return i;
+  }
+  return 0;
+}
+
+function spinWheel(forced) {
+  if (wheelSpinning) return;
+  wheelSpinning = true;
+  const i = pickWheelSlice(forced);
+  const seg = 360 / WHEEL_SLICES.length;
+  // land the CENTER of slice i under the top pointer
+  wheelRotation += 720 + ((360 - (i * seg + seg / 2)) - (wheelRotation % 360) + 360) % 360;
+  $('wheel-disc').style.transform = `rotate(${wheelRotation}deg)`;
+  save.update((d) => { d.wheel.spins++; });
+  setTimeout(() => {
+    wheelSpinning = false;
+    const prize = WHEEL_SLICES[i];
+    if (prize.coins) { const c = save.addCoins(prize.coins); save.feedBank(c, PIGGY.cap, PIGGY.rate); toast(`🎡 +◆${prize.coins}${prize.coins >= 400 ? ' JACKPOT!' : ''}`); }
+    if (prize.ammo) { save.addPendingAmmo(prize.ammo); toast(`🎡 +${prize.ammo} ammo (next run)`); }
+    if (prize.slowmo) { save.addCharges('slowmo', prize.slowmo); toast('🎡 +1 slow-mo'); }
+    if (prize.rewind) { save.addCharges('rewind', prize.rewind); toast('🎡 +1 rewind'); }
+    sfx.win();
+    refreshWallets();
+    syncWheelButtons();
+  }, 3200);
+}
+
+$('btn-wheel').addEventListener('click', () => { sfx.click(); openWheel(); });
+$('btn-spin').addEventListener('click', () => { if (freeSpinAvailable()) { sfx.click(); spinWheel(); syncWheelButtons(); } });
+$('btn-spin-ad').addEventListener('click', async () => {
+  sfx.click();
+  if (!adSpinAvailable()) return;
+  if (await ads.showRewarded()) { spinWheel(); }
+  syncWheelButtons();
+});
+
+// ---------------------------------------------------------------------------
 // Menu wiring
 // ---------------------------------------------------------------------------
 $('card-campaign').addEventListener('click', () => { sfx.click(); buildLevelGrid(); showBase('screen-levels'); });
@@ -823,7 +1044,7 @@ document.querySelectorAll('[data-back]').forEach((b) =>
   b.addEventListener('click', () => { sfx.click(); showBase('screen-menu'); }));
 
 function syncSoundButton() {
-  $('btn-sound').textContent = save.get().sound ? '🔊' : '🔇';
+  $('btn-sound').textContent = save.get().sound ? '🔊 SOUND ON' : '🔇 SOUND OFF';
 }
 $('btn-sound').addEventListener('click', () => {
   const v = !save.get().sound;
@@ -833,6 +1054,23 @@ $('btn-sound').addEventListener('click', () => {
   syncSoundButton();
   sfx.click();
 });
+
+// ---------------------------------------------------------------------------
+// Settings (incl. left-handed mode)
+// ---------------------------------------------------------------------------
+function applyFlip() {
+  const flipped = save.get().flipControls;
+  $('hud').classList.toggle('flipped', flipped);
+  $('btn-flip').setAttribute('aria-pressed', String(flipped));
+  $('btn-flip').style.borderColor = flipped ? 'var(--glow2)' : '';
+}
+$('btn-settings').addEventListener('click', () => { sfx.click(); syncSoundButton(); showOverlay('screen-settings'); });
+$('btn-flip').addEventListener('click', () => {
+  sfx.click();
+  save.setFlipControls(!save.get().flipControls);
+  applyFlip();
+});
+$('app-version').textContent = `v${APP_VERSION}`;
 
 // ---------------------------------------------------------------------------
 // Boot
@@ -855,6 +1093,7 @@ document.addEventListener('visibilitychange', () => {
 ads.initAds(save.get().adsRemoved);
 ads.setAdsRemoved(save.get().adsRemoved);
 syncSoundButton();
+applyFlip();
 daily.ensureDailyState();
 showBase('screen-menu');
 maybeScheduleNotifications();
@@ -878,6 +1117,7 @@ if (location.search.includes('debug')) {
     game, input, save, renderer, daily, sessionEchoes,
     playLevel: playCampaign,
     playDaily, playEndless, openDailyModal, refreshMenu,
+    openWheel, spinWheel, buildStarStrip, buildStore, rankProgress,
     win() { game.ship.z = game.level.length - 0.5; },
     crash() { game._crash('wall'); },
     state() {

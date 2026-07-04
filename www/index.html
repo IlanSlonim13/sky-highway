@@ -14,11 +14,15 @@
   <!-- ============ MAIN MENU ============ -->
   <section id="screen-menu" class="screen visible">
     <div class="menu-top">
-      <button id="btn-sound" class="hud-btn">🔊</button>
+      <button id="btn-settings" class="hud-btn">⚙</button>
       <div class="coin-chip"><span class="coin-ico">◆</span><span id="menu-coins">0</span></div>
     </div>
     <h1 class="title">SKY<br>HIGHWAY</h1>
     <p class="subtitle">race the road · race your past</p>
+    <div id="rank-chip" class="rank-chip">
+      <span id="rank-label">RANK 1 · CADET</span>
+      <div class="rank-bar"><div id="rank-fill"></div></div>
+    </div>
 
     <div class="mode-cards">
       <button id="card-campaign" class="mode-card">
@@ -42,6 +46,7 @@
 
     <div class="menu-row">
       <button id="btn-hangar" class="btn btn-small">🛠 HANGAR</button>
+      <button id="btn-wheel" class="btn btn-small">🎡 WHEEL<span id="wheel-free" class="free-badge" hidden>FREE</span></button>
       <button id="btn-store" class="btn btn-small">🛒 STORE</button>
     </div>
     <div id="piggy-chip" class="piggy-chip" hidden>🐷 <span id="piggy-fill">0</span>/<span id="piggy-cap">500</span></div>
@@ -54,6 +59,7 @@
       <h2>SELECT LEVEL</h2>
       <div class="coin-chip"><span class="coin-ico">◆</span><span id="levels-coins">0</span></div>
     </header>
+    <div id="star-strip" class="star-strip"></div>
     <div id="sector-tabs" class="sector-tabs"></div>
     <div id="level-grid" class="level-grid"></div>
   </section>
@@ -129,6 +135,32 @@
     </div>
   </section>
 
+  <!-- ============ SETTINGS ============ -->
+  <section id="screen-settings" class="screen overlay">
+    <div class="panel">
+      <h2>SETTINGS</h2>
+      <button id="btn-sound" class="btn">🔊 SOUND ON</button>
+      <button id="btn-flip" class="btn" aria-pressed="false">🫲 LEFT-HANDED MODE<span class="btn-note">swap fire and jump sides</span></button>
+      <p class="muted small-print">Sky Highway <span id="app-version">v1.0.0</span> · <a id="privacy-link" href="PRIVACY-POLICY.md" target="_blank" rel="noopener">privacy policy</a></p>
+      <button class="btn btn-ghost" data-back>CLOSE</button>
+    </div>
+  </section>
+
+  <!-- ============ PRIZE WHEEL ============ -->
+  <section id="screen-wheel" class="screen overlay">
+    <div class="panel">
+      <h2 class="gold">PRIZE WHEEL</h2>
+      <div class="wheel-wrap">
+        <div id="wheel-disc" class="wheel-disc"></div>
+        <div class="wheel-pointer">▼</div>
+      </div>
+      <button id="btn-spin" class="btn btn-primary btn-big">SPIN — FREE</button>
+      <button id="btn-spin-ad" class="btn btn-gold" hidden>🎬 SPIN AGAIN<span class="btn-note">watch ad</span></button>
+      <p id="wheel-note" class="muted">one free spin every day</p>
+      <button class="btn btn-ghost" data-back>CLOSE</button>
+    </div>
+  </section>
+
   <!-- ============ PAUSE ============ -->
   <section id="screen-pause" class="screen overlay">
     <div class="panel">
@@ -155,6 +187,8 @@
   <section id="screen-complete" class="screen overlay">
     <div class="panel">
       <h2 class="win" id="complete-title">LEVEL COMPLETE!</h2>
+      <div id="stars-row" class="stars-row" hidden>☆☆☆</div>
+      <div id="firstwin-banner" class="echo-banner gold-banner" hidden>☀ FIRST VICTORY OF THE DAY ×2</div>
       <div id="echo-banner" class="echo-banner" hidden>👻 ECHO BEATEN <span class="pill">+25</span></div>
       <p id="complete-stats" class="muted"></p>
       <div id="complete-missions" class="mission-ticks"></div>
