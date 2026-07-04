@@ -60,8 +60,9 @@ export const ECONOMY = {
 };
 
 export const ADS = {
-  interstitialEveryNFails: 3,   // show interstitial after every 3rd failed run
-  interstitialEveryNWins: 2,    // and after every 2nd completed level
+  interstitialEveryNFails: 6,   // show interstitial after every 6th failed run
+  interstitialEveryNWins: 4,    // and after every 4th completed level
+  minInterstitialGapS: 180,     // never two interstitials within 3 minutes
   rewardedRewindReward: 1,      // rewind charges granted per rewarded ad
   rewardedCoinReward: 40,       // coins granted per rewarded ad
 };

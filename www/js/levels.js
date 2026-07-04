@@ -11,7 +11,7 @@
 
 import { CELL, TRACK_LANES, PHYSICS, LANE_MIN, LANE_MAX, ENDLESS } from './config.js';
 
-export const LEVEL_COUNT = 100;
+export const LEVEL_COUNT = 500;
 
 // ---------------------------------------------------------------------------
 // Themes — neon palettes cycled across the campaign.
@@ -120,6 +120,20 @@ function level1() {
     .gap(2)
     .straight(4)
     .coins([0]).coins([0])
+    .straight(4)
+    .bridge(6, -3, 1)
+    .straight(4)
+    .gap(2)
+    .straight(5)
+    .coins([-1, 0, 1])
+    .bridge(6, -1, 3)
+    .straight(4)
+    .gap(2)
+    .straight(4)
+    .coins([0])
+    .bridge(5, -2, 2)
+    .straight(4)
+    .gap(2)
     .straight(6)
     .build();
 }
@@ -146,6 +160,19 @@ function level2() {
     .gap(3)
     .straight(5)
     .coins([0]).coins([0])
+    .straight(4)
+    .floorWith(1, [[-1, CELL.LOW], [0, CELL.LOW]])
+    .straight(4)
+    .floorWith(1, [[1, CELL.LOW], [2, CELL.LOW]])
+    .straight(4)
+    .floorWith(1, [[0, CELL.BOOST]])
+    .straight(6)
+    .floorWith(1, [[-2, CELL.LOW], [-1, CELL.LOW], [0, CELL.LOW], [1, CELL.LOW], [2, CELL.LOW], [3, CELL.LOW]])
+    .straight(4)
+    .coins([-1, 1])
+    .gap(3)
+    .straight(4)
+    .floorWith(1, [[0, CELL.LOW]])
     .straight(6)
     .build();
 }
@@ -172,6 +199,20 @@ function level3() {
     .coins([0])
     .floorWith(2, [[-3, CELL.TALL], [-2, CELL.TALL], [1, CELL.TALL], [2, CELL.TALL], [3, CELL.TALL]])
     .straight(5)
+    .gap(2)
+    .straight(4)
+    .floorWith(2, [[-2, CELL.TALL]])
+    .straight(2)
+    .floorWith(2, [[2, CELL.TALL]])
+    .straight(2)
+    .floorWith(2, [[0, CELL.TALL]])
+    .straight(3)
+    .coins([-1, 1])
+    .floorWith(2, [[-3, CELL.TALL], [-1, CELL.TALL], [1, CELL.TALL], [3, CELL.TALL]])
+    .straight(4)
+    .bridge(6, 0, 3)
+    .floorWith(2, [[2, CELL.TALL]])
+    .straight(3)
     .gap(2)
     .straight(6)
     .build();
@@ -201,6 +242,15 @@ function level4() {
     .gap(3)
     .straight(4)
     .coins([0]).coins([0])
+    .straight(4)
+    .floorWith(3, [[-3, CELL.HAZARD], [-2, CELL.HAZARD], [1, CELL.HAZARD], [2, CELL.HAZARD], [3, CELL.HAZARD]])
+    .straight(3)
+    .floorWith(3, [[-1, CELL.HAZARD], [0, CELL.HAZARD], [1, CELL.HAZARD], [3, CELL.HAZARD]])
+    .straight(4)
+    .coins([-2])
+    .floorWith(4, [[-3, CELL.HAZARD], [-2, CELL.HAZARD], [-1, CELL.HAZARD], [0, CELL.HAZARD], [2, CELL.HAZARD], [3, CELL.HAZARD]])
+    .straight(4)
+    .gap(2)
     .straight(6)
     .build();
 }
@@ -232,6 +282,17 @@ function level5() {
     .floorWith(2, [[-2, CELL.TALL], [2, CELL.TALL]])
     .straight(4)
     .gap(2)
+    .straight(4)
+    .floorWith(1, [[0, CELL.AMMO]])
+    .straight(3)
+    .raw(['##DDDDD'])
+    .straight(4)
+    .floorWith(1, [[-1, CELL.PAD]])
+    .gap(4)
+    .straight(4)
+    .coins([0])
+    .floorWith(1, [[1, CELL.PAD]])
+    .gap(5)
     .straight(6)
     .build();
 }
@@ -258,6 +319,16 @@ function level6() {
     .bridge(8, 1, 1)          // single lane, off-center
     .straight(5)
     .gap(3)
+    .straight(4)
+    .bridge(7, -1, 0)
+    .straight(3)
+    .bridge(7, 0, 1)
+    .straight(3)
+    .coins([0])
+    .bridge(9, 0, 0)
+    .straight(4)
+    .gap(2)
+    .bridge(5, -2, 0)
     .straight(6)
     .build();
 }
@@ -287,6 +358,18 @@ function level7() {
     .straight(4)
     .coins([-2, 0, 2])
     .floorWith(1, [[-3, CELL.LOW], [-2, CELL.LOW], [-1, CELL.LOW], [0, CELL.LOW], [1, CELL.LOW]])
+    .straight(3)
+    .gap(3)
+    .straight(4)
+    .floorWith(1, [[-1, CELL.LOW], [0, CELL.LOW], [1, CELL.LOW]])
+    .straight(3)
+    .gap(3)
+    .straight(3)
+    .floorWith(1, [[0, CELL.BOOST]])
+    .gap(4)
+    .straight(4)
+    .coins([0, 1])
+    .floorWith(1, [[-3, CELL.LOW], [-2, CELL.LOW], [2, CELL.LOW], [3, CELL.LOW]])
     .straight(3)
     .gap(3)
     .straight(6)
@@ -322,6 +405,18 @@ function level8() {
     .floorWith(2, [[-2, CELL.TALL], [0, CELL.TALL], [2, CELL.TALL]])
     .straight(5)
     .coins([0]).coins([0])
+    .straight(4)
+    .floorWith(3, [[-3, CELL.HAZARD], [-2, CELL.HAZARD], [2, CELL.HAZARD], [3, CELL.HAZARD]])
+    .floorWith(2, [[0, CELL.TALL]])
+    .straight(3)
+    .floorWith(1, [[-1, CELL.AMMO]])
+    .straight(2)
+    .floorWith(1, [[-1, CELL.DESTRUCTIBLE], [0, CELL.DESTRUCTIBLE], [1, CELL.DESTRUCTIBLE], [2, CELL.DESTRUCTIBLE]])
+    .straight(3)
+    .coins([0])
+    .floorWith(2, [[-2, CELL.TALL], [2, CELL.TALL]])
+    .straight(3)
+    .gap(2)
     .straight(6)
     .build();
 }
@@ -354,6 +449,19 @@ function level9() {
     .bridge(4, 0, 2)
     .straight(4)
     .gap(2)
+    .straight(3)
+    .floorWith(1, [[0, CELL.BOOST]])
+    .straight(4)
+    .gap(4)
+    .straight(4)
+    .coins([0])
+    .floorWith(1, [[-1, CELL.BOOST], [1, CELL.BOOST]])
+    .gap(4)
+    .straight(4)
+    .gap(3)
+    .straight(3)
+    .floorWith(1, [[0, CELL.BOOST]])
+    .gap(4)
     .straight(6)
     .build();
 }
@@ -392,6 +500,20 @@ function level10() {
     .gap(4)
     .straight(4)
     .coins([0]).coins([0])
+    .straight(4)
+    .floorWith(2, [[-1, CELL.TALL], [1, CELL.TALL]])
+    .straight(3)
+    .floorWith(1, [[0, CELL.AMMO]])
+    .straight(3)
+    .raw(['DDDD##D'])      // corridor on the right of center
+    .straight(3)
+    .floorWith(3, [[-3, CELL.HAZARD], [-2, CELL.HAZARD], [0, CELL.HAZARD], [2, CELL.HAZARD], [3, CELL.HAZARD]])
+    .straight(3)
+    .coins([-1, 1])
+    .floorWith(1, [[0, CELL.PAD]])
+    .gap(5)
+    .straight(4)
+    .gap(3)
     .straight(8)
     .build();
 }
@@ -660,8 +782,9 @@ class TrackBuilder {
 function generateLevel(index) {
   const rng = mulberry32(0xA11CE + index * 7919);
   const speed = levelSpeed(index);
-  const difficulty = Math.min(1, (index - 9) / 90); // 0 at lvl 10, 1 at lvl 100
-  const targetRows = Math.round(200 + 260 * difficulty); // 200 -> 460 rows
+  const difficulty = Math.min(1, (index - 9) / 240); // 0 at lvl 10, 1 at ~lvl 250
+  // levels grow with progress: ~320 rows at level 11 -> ~1000 rows from level ~310 on
+  const targetRows = Math.round(320 + 680 * Math.min(1, (index - 9) / 300));
 
   const tb = new TrackBuilder(rng, difficulty, maxJumpGap(speed));
   tb.open(8);
@@ -681,7 +804,7 @@ export function getDailyLevel(dayKey) {
   const speed = 8 + difficulty * 3;
   const tb = new TrackBuilder(rng, difficulty, maxJumpGap(speed));
   tb.open(8);
-  const targetRows = 300 + Math.floor(rng() * 80);
+  const targetRows = 420 + Math.floor(rng() * 120);
   while (tb.rows.length < targetRows) tb.emitOne();
   tb.close(6);
   const rows = tb.takeRows();
