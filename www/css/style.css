@@ -593,6 +593,11 @@ h2.gold { color: var(--gold); text-shadow: 0 0 14px var(--gold); }
   .mission-tick .claim { min-height: 40px; padding: 6px 14px; }
 }
 
+/* ---------- v7: roomier jump button in landscape ---------- */
+@media (orientation: landscape) {
+  .hud-action.jump { width: 104px; height: 104px; font-size: 2.1rem; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   * { animation: none !important; transition: none !important; }
 }

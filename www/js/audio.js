@@ -110,37 +110,140 @@ export const sfx = {
 
 // ---------------------------------------------------------------------------
 // Music — an 8-bit chiptune sequencer with two songs:
-//   'level' — "Hyperlane": 152 BPM driving square lead, pumping bass,
-//             16th-note arps, noise drums. Thrilling.
+//   'level' — "Hyperlane Odyssey": a full 60-bar arrangement (~91 s at
+//             158 BPM before it repeats) — intro, two verses, chorus,
+//             bridge, verse reprise, final chorus, breakdown. Authored as
+//             sections and expanded into flat per-bar arrays at load time.
 //   'menu'  — "Docking Bay": mellow triangle arps over soft chords.
 // Patterns are 16-step bars; MIDI note numbers, 0 = rest.
 // ---------------------------------------------------------------------------
 const midiHz = (m) => 440 * Math.pow(2, (m - 69) / 12);
 
-const SONGS = {
+// chord bank: bass root (octave 2) + mid-register triad for the arp
+const CHORDS = {
+  Am: { root: 45, arp: [57, 60, 64] },
+  F:  { root: 41, arp: [53, 57, 60] },
+  C:  { root: 48, arp: [60, 64, 67] },
+  G:  { root: 43, arp: [55, 59, 62] },
+  Dm: { root: 38, arp: [50, 53, 57] },
+  E:  { root: 40, arp: [52, 56, 59] },
+};
+
+// bass figure generators (8 eighth-notes from a chord root)
+const BASS_STYLES = {
+  pump:   (r) => [r, r, r + 12, r, r, r + 12, r, r + 12],
+  drive:  (r) => [r, r + 12, r, r + 12, r, r + 12, r, r + 12],
+  half:   (r) => [r, 0, r + 7, 0, r, 0, r + 7, 0],
+  sparse: (r) => [r, 0, 0, 0, r + 12, 0, 0, 0],
+};
+
+const DRUM_KITS = {
+  quiet:  { kick: [0], snare: [], hatEvery: 4 },
+  verse:  { kick: [0, 8, 10], snare: [4, 12], hatEvery: 2 },
+  chorus: { kick: [0, 6, 8, 10], snare: [4, 12], hatEvery: 2 },
+  bridge: { kick: [0, 8], snare: [4, 12], hatEvery: 2 },
+};
+
+// --- "Hyperlane Odyssey" sections (A minor) --------------------------------
+const INTRO = {
+  chords: ['Am', 'Am', 'F', 'G'], bass: 'sparse', drums: 'quiet',
+  lead: [
+    [0, 0, 0, 0, 69, 0, 72, 0],
+    [76, 0, 72, 0, 69, 0, 72, 0],
+    [77, 0, 72, 0, 69, 0, 72, 0],
+    [79, 0, 74, 0, 71, 0, 74, 0],
+  ],
+};
+const VERSE1 = {
+  chords: ['Am', 'F', 'C', 'G', 'Am', 'F', 'C', 'E'], bass: 'pump', drums: 'verse',
+  lead: [
+    [69, 0, 72, 74, 76, 74, 72, 69],
+    [69, 72, 77, 76, 72, 69, 65, 69],
+    [67, 72, 76, 72, 79, 76, 72, 67],
+    [74, 71, 67, 71, 74, 76, 74, 71],
+    [69, 0, 72, 74, 76, 79, 81, 79],
+    [77, 76, 72, 77, 76, 72, 69, 72],
+    [76, 72, 67, 72, 76, 79, 84, 79],
+    [76, 75, 71, 68, 64, 68, 71, 75],
+  ],
+};
+const VERSE2 = {
+  chords: ['Am', 'F', 'C', 'G', 'Am', 'F', 'C', 'E'], bass: 'pump', drums: 'verse',
+  lead: [
+    [81, 79, 76, 79, 81, 84, 81, 79],
+    [77, 81, 84, 81, 77, 72, 77, 81],
+    [79, 76, 72, 76, 79, 84, 88, 84],
+    [83, 79, 74, 79, 83, 86, 83, 79],
+    [81, 0, 81, 84, 88, 84, 81, 76],
+    [84, 81, 77, 81, 84, 77, 72, 77],
+    [84, 79, 76, 79, 84, 88, 84, 79],
+    [80, 76, 71, 76, 80, 83, 88, 83],
+  ],
+};
+const CHORUS = {
+  chords: ['C', 'G', 'Am', 'F', 'C', 'G', 'Am', 'E'], bass: 'drive', drums: 'chorus',
+  lead: [
+    [84, 0, 79, 0, 76, 79, 84, 0],
+    [83, 0, 79, 0, 74, 79, 83, 0],
+    [81, 0, 76, 0, 72, 76, 81, 0],
+    [81, 84, 81, 77, 72, 77, 81, 84],
+    [88, 0, 84, 0, 79, 84, 88, 0],
+    [86, 0, 83, 0, 79, 83, 86, 0],
+    [84, 81, 79, 76, 72, 76, 79, 81],
+    [76, 0, 80, 0, 83, 0, 88, 0],
+  ],
+};
+const BRIDGE = {
+  chords: ['Dm', 'Am', 'Dm', 'E', 'F', 'C', 'G', 'E'], bass: 'half', drums: 'bridge',
+  lead: [
+    [74, 0, 77, 74, 69, 74, 77, 0],
+    [76, 0, 72, 76, 69, 72, 76, 0],
+    [74, 77, 81, 77, 74, 69, 65, 69],
+    [68, 71, 76, 71, 68, 64, 68, 71],
+    [72, 77, 76, 72, 69, 72, 77, 81],
+    [79, 76, 72, 76, 79, 84, 79, 76],
+    [74, 79, 83, 79, 74, 71, 67, 71],
+    [64, 68, 71, 76, 80, 83, 88, 0],
+  ],
+};
+const BREAKDOWN = {
+  chords: ['Am', 'F', 'Am', 'E', 'Am', 'F', 'G', 'E'], bass: 'sparse', drums: 'quiet',
+  lead: [
+    [69, 0, 0, 0, 64, 0, 0, 0],
+    [65, 0, 0, 0, 69, 0, 0, 0],
+    [69, 0, 0, 0, 72, 0, 0, 0],
+    [68, 0, 0, 0, 71, 0, 0, 0],
+    [69, 0, 72, 0, 76, 0, 0, 0],
+    [77, 0, 76, 0, 72, 0, 0, 0],
+    [79, 0, 76, 0, 74, 0, 0, 0],
+    [76, 0, 79, 0, 83, 0, 88, 0],
+  ],
+};
+
+// expand a section list into flat per-bar bass/lead/arp/drum arrays
+function expandSections(sections) {
+  const bass = [], lead = [], arp = [], drums = [];
+  for (const sec of sections) {
+    sec.chords.forEach((name, i) => {
+      const c = CHORDS[name];
+      bass.push(BASS_STYLES[sec.bass](c.root));
+      lead.push(sec.lead[i]);
+      arp.push(c.arp);
+      drums.push(DRUM_KITS[sec.drums]);
+    });
+  }
+  return { bass, lead, arp, drums, bars: bass.length };
+}
+
+// exported for the node test harness (bar-shape assertions)
+export const SONGS = {
   level: {
     bpm: 158,
-    bars: 4,
-    // per bar: 8 eighth-note bass hits (root pump with octave kicks)
-    bass: [
-      [45, 45, 57, 45, 45, 57, 45, 57],   // Am
-      [41, 41, 53, 41, 41, 53, 41, 53],   // F
-      [48, 48, 60, 48, 48, 60, 48, 60],   // C
-      [43, 43, 55, 43, 43, 55, 43, 55],   // G
-    ],
     bassType: 'square', bassGain: 0.30,
-    // per bar: 8 eighth-note lead melody notes
-    lead: [
-      [69, 72, 76, 81, 79, 76, 72, 76],
-      [65, 69, 72, 77, 76, 72, 69, 72],
-      [67, 72, 76, 79, 84, 79, 76, 72],
-      [74, 71, 67, 71, 74, 79, 77, 74],
-    ],
     leadType: 'square', leadGain: 0.16,
-    // per bar: chord tones for the 16th-note arp (played +1 octave)
-    arp: [[57, 60, 64], [53, 57, 60], [60, 64, 67], [55, 59, 62]],
     arpType: 'square', arpGain: 0.055,
-    drums: { kick: [0, 8, 10], snare: [4, 12], hatEvery: 2 },
+    // 4 + 8*7 = 60 bars ≈ 91 s at base tempo before the song repeats
+    ...expandSections([INTRO, VERSE1, VERSE2, CHORUS, BRIDGE, VERSE1, CHORUS, BREAKDOWN]),
   },
   menu: {
     bpm: 100,
@@ -161,7 +264,12 @@ const SONGS = {
     leadType: 'triangle', leadGain: 0.14,
     arp: [[57, 60, 64], [53, 57, 60], [60, 64, 67], [55, 59, 62]],
     arpType: 'triangle', arpGain: 0.04,
-    drums: { kick: [0], snare: [], hatEvery: 4 },
+    drums: [
+      { kick: [0], snare: [], hatEvery: 4 },
+      { kick: [0], snare: [], hatEvery: 4 },
+      { kick: [0], snare: [], hatEvery: 4 },
+      { kick: [0], snare: [], hatEvery: 4 },
+    ],
   },
 };
 
@@ -225,8 +333,8 @@ function scheduleMusic() {
     const arpNote = chord[[0, 1, 2, 1][s % 4]] + 12;
     chipNote(song.arpType, arpNote, t0, step16 * 0.9, song.arpGain);
 
-    // drums
-    const d = song.drums;
+    // drums (per-bar kits — sections vary from sparse intro to driving chorus)
+    const d = song.drums[bar];
     if (d.kick.includes(s)) chipNote('sine', 41, t0, 0.09, 0.5); // thump
     if (d.snare.includes(s)) chipNoise(t0, 0.09, 1800, 0.30);
     if (s % d.hatEvery === 0) chipNoise(t0, 0.03, 6000, 0.10);
