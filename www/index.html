@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no">
+  <meta name="theme-color" content="#050014">
+  <title>Sky Highway</title>
+  <link rel="icon" href="assets/icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <canvas id="game"></canvas>
+
+  <!-- ============ MAIN MENU ============ -->
+  <section id="screen-menu" class="screen visible">
+    <div class="coin-chip"><span class="coin-ico">◆</span><span id="menu-coins">0</span></div>
+    <h1 class="title">SKY<br>HIGHWAY</h1>
+    <p class="subtitle">a neon road above the stars</p>
+    <div class="menu-buttons">
+      <button id="btn-play" class="btn btn-primary">▶ &nbsp;PLAY</button>
+      <button id="btn-store" class="btn">🛒 &nbsp;STORE</button>
+      <button id="btn-sound" class="btn btn-small">🔊 SOUND ON</button>
+    </div>
+    <p class="hint-line">drag to steer · tap to jump · fire to blast barriers</p>
+  </section>
+
+  <!-- ============ LEVEL SELECT ============ -->
+  <section id="screen-levels" class="screen">
+    <header class="bar">
+      <button class="btn btn-back" data-back>‹</button>
+      <h2>SELECT LEVEL</h2>
+      <div class="coin-chip"><span class="coin-ico">◆</span><span id="levels-coins">0</span></div>
+    </header>
+    <div id="level-grid" class="level-grid"></div>
+  </section>
+
+  <!-- ============ STORE ============ -->
+  <section id="screen-store" class="screen">
+    <header class="bar">
+      <button class="btn btn-back" data-back>‹</button>
+      <h2>STORE</h2>
+      <div class="coin-chip"><span class="coin-ico">◆</span><span id="store-coins">0</span></div>
+    </header>
+    <div class="store-scroll">
+      <h3 class="store-section">POWER-UPS <span>(coins)</span></h3>
+      <div id="store-coin-items"></div>
+      <h3 class="store-section">FREE COINS</h3>
+      <div id="store-earn"></div>
+      <h3 class="store-section">SHOP</h3>
+      <div id="store-iap-items"></div>
+      <button id="btn-restore" class="btn btn-small">RESTORE PURCHASES</button>
+    </div>
+  </section>
+
+  <!-- ============ IN-GAME HUD ============ -->
+  <section id="hud" class="screen transparent">
+    <header class="hud-top">
+      <button id="btn-pause" class="hud-btn">II</button>
+      <div class="progress-wrap"><div id="progress-fill"></div><div id="progress-label">LEVEL 1</div></div>
+      <div class="coin-chip small"><span class="coin-ico">◆</span><span id="hud-coins">0</span></div>
+    </header>
+    <div class="hud-bottom">
+      <div class="hud-left">
+        <button id="btn-fire" class="hud-action fire">⌖<span id="ammo-count" class="badge">0</span></button>
+      </div>
+      <div class="hud-right">
+        <button id="btn-slowmo" class="hud-action slowmo">🐌<span id="slowmo-count" class="badge">0</span></button>
+        <button id="btn-jump" class="hud-action jump">▲</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ PAUSE ============ -->
+  <section id="screen-pause" class="screen overlay">
+    <div class="panel">
+      <h2>PAUSED</h2>
+      <button id="btn-resume" class="btn btn-primary">RESUME</button>
+      <button id="btn-restart" class="btn">RESTART</button>
+      <button id="btn-quit" class="btn">QUIT TO MENU</button>
+    </div>
+  </section>
+
+  <!-- ============ REVIVE (extra life) ============ -->
+  <section id="screen-revive" class="screen overlay">
+    <div class="panel">
+      <h2 id="revive-title">CRASHED!</h2>
+      <p id="revive-sub" class="muted">72% of the way there</p>
+      <button id="btn-revive-ad" class="btn btn-primary btn-big">▶ EXTRA LIFE<span class="btn-note">watch ad · rewind 3s</span></button>
+      <button id="btn-revive-charge" class="btn">⏪ USE REWIND <span id="revive-charges" class="pill">2</span></button>
+      <button id="btn-revive-buy" class="btn">◆ BUY 3 REWINDS <span class="pill">80</span></button>
+      <button id="btn-giveup" class="btn btn-ghost">GIVE UP <span id="revive-count" class="pill">5</span></button>
+    </div>
+  </section>
+
+  <!-- ============ LEVEL COMPLETE ============ -->
+  <section id="screen-complete" class="screen overlay">
+    <div class="panel">
+      <h2 class="win">LEVEL COMPLETE!</h2>
+      <p id="complete-stats" class="muted"></p>
+      <button id="btn-next" class="btn btn-primary">NEXT LEVEL ▶</button>
+      <button id="btn-replay" class="btn">REPLAY</button>
+      <button id="btn-complete-menu" class="btn btn-ghost">MENU</button>
+    </div>
+  </section>
+
+  <!-- ============ FAILED ============ -->
+  <section id="screen-failed" class="screen overlay">
+    <div class="panel">
+      <h2 class="lose">SHIP LOST</h2>
+      <p id="failed-stats" class="muted"></p>
+      <button id="btn-retry" class="btn btn-primary">TRY AGAIN</button>
+      <button id="btn-failed-menu" class="btn btn-ghost">MENU</button>
+    </div>
+  </section>
+
+  <!-- simulated web banner ad -->
+  <div id="sim-banner">banner ad (AdMob on device)</div>
+
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>

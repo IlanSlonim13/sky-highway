@@ -1,0 +1,494 @@
+// Sky Highway — simulation core.
+//
+// Fixed-timestep physics (1/120s) scaled by an eased timeScale (slow-mo,
+// crash ramps). A ring buffer of state snapshots powers the 3-second-rewind
+// revive. The Game never touches persistence or DOM UI: main.js listens via
+// the `events` callbacks and drives revive/slow-mo after charges are spent.
+
+import {
+  PHYSICS, SHIP, BOOST, SLOWMO, REWIND, CELL, BLOCK_HEIGHTS, WEAPON, TRACK_LANES,
+} from './config.js';
+import { sfx } from './audio.js';
+
+const STEP = 1 / 120;
+
+export class Game {
+  constructor(input) {
+    this.input = input;
+    this.events = {}; // { onCrash(type), onComplete(results), onReviveDone() }
+    this.attract = false;
+    this.level = null;
+    this.state = 'idle';
+  }
+
+  loadLevel(level, { attract = false, startAmmo = 0 } = {}) {
+    this.level = level;
+    this.attract = attract;
+    this.state = attract ? 'attract' : 'ready';
+
+    this.ship = {
+      x: 0, y: 0, z: 0, vy: 0, vx: 0, bank: 0,
+      grounded: true, speedMul: 1, boostT: 0,
+    };
+    this.time = 0;             // game-time seconds since level start
+    this.timeScale = 1;
+    this._timeScaleTarget = 1;
+
+    this.runCoins = 0;
+    this.ammo = Math.min(WEAPON.maxAmmo, startAmmo);
+    this.collected = new Set();
+    this._collectedOrder = [];
+    this.destroyed = new Set();
+    this._destroyedOrder = [];
+    this.projectiles = [];
+    this.particles = [];
+
+    this.coyote = 0;
+    this.jumpBuf = 0;
+    this.shake = 0;
+    this.shipVisible = true;
+    this.crashType = null;
+    this.revivesUsed = 0;
+
+    this.slowmoLeft = 0;       // real seconds of slow-mo remaining
+    this.slowmoVisual = 0;
+    this.rewindVisual = 0;
+    this.rewindGhosts = null;
+
+    this._acc = 0;
+    this._crashTimer = 0;
+    this._rewindAnim = null;
+    this._snapAcc = 0;
+    this.history = [];         // ring buffer of snapshots
+
+    this.groundInfoForRender = this._sampleGround(0, 0);
+  }
+
+  start() { if (this.state === 'ready') this.state = 'running'; }
+
+  get progress() {
+    return this.level ? Math.min(1, this.ship.z / this.level.length) : 0;
+  }
+
+  // ------------------------------------------------------------------
+  // Frame driver — called once per rAF with real dt (seconds).
+  // ------------------------------------------------------------------
+  frame(dtReal) {
+    dtReal = Math.min(dtReal, 0.05);
+    this.input.update();
+
+    // ease timeScale toward target
+    const ease = Math.min(1, dtReal / SLOWMO.rampTime);
+    this.timeScale += (this._timeScaleTarget - this.timeScale) * ease * 2.2;
+
+    // slow-mo countdown runs on real time
+    if (this.slowmoLeft > 0 && this.state === 'running') {
+      this.slowmoLeft -= dtReal;
+      if (this.slowmoLeft <= 0) { this.slowmoLeft = 0; this._timeScaleTarget = 1; }
+    }
+    this.slowmoVisual += ((this.slowmoLeft > 0 ? 1 : 0) - this.slowmoVisual) * Math.min(1, dtReal * 6);
+
+    this.shake = Math.max(0, this.shake - dtReal * 2);
+
+    switch (this.state) {
+      case 'attract':
+        this.ship.z += this.level.speed * 0.45 * dtReal;
+        if (this.ship.z > this.level.length - 45) this.ship.z = 0;
+        break;
+
+      case 'running': {
+        const dt = dtReal * this.timeScale;
+        this._acc += dt;
+        while (this._acc >= STEP && this.state === 'running') {
+          this._acc -= STEP;
+          this._step(STEP);
+        }
+        break;
+      }
+
+      case 'crashing':
+        this._crashTimer -= dtReal;
+        this._updateParticles(dtReal * this.timeScale);
+        if (this._crashTimer <= 0) {
+          this.state = 'reviveOffer';
+          this.events.onCrash?.(this.crashType);
+        }
+        break;
+
+      case 'rewinding':
+        this._stepRewindAnim(dtReal);
+        break;
+
+      default:
+        this._updateParticles(dtReal);
+        break;
+    }
+
+    this.rewindVisual += ((this.state === 'rewinding' ? 1 : 0) - this.rewindVisual) * Math.min(1, dtReal * 8);
+    this.groundInfoForRender = this._sampleGround(this.ship.x, this.ship.z);
+  }
+
+  // ------------------------------------------------------------------
+  // One physics step (dt is game-time).
+  // ------------------------------------------------------------------
+  _step(dt) {
+    const s = this.ship;
+    const level = this.level;
+    this.time += dt;
+
+    // --- forward ---
+    if (s.boostT > 0) {
+      s.boostT -= dt;
+      s.speedMul = 1 + (BOOST.speedMultiplier - 1) * Math.min(1, s.boostT / (BOOST.duration * 0.6));
+    } else s.speedMul = 1;
+    s.z += level.speed * s.speedMul * dt;
+
+    // --- lateral: touch drag is direct, keyboard is velocity-based ---
+    const drag = this.input.consumeDrag();
+    let dx = 0;
+    if (drag !== 0) {
+      dx = Math.max(-0.45, Math.min(0.45, drag));
+      s.vx = dx / Math.max(dt, 1e-4) * 0.35; // remember momentum for banking
+    } else {
+      const target = this.input.axis * PHYSICS.lateralSpeed;
+      s.vx += (target - s.vx) * Math.min(1, PHYSICS.lateralAccel * dt / PHYSICS.lateralSpeed);
+      dx = s.vx * dt;
+    }
+    s.x = Math.max(-3.35, Math.min(3.35, s.x + dx));
+    const bankTarget = Math.max(-1, Math.min(1, s.vx / PHYSICS.lateralSpeed));
+    s.bank += (bankTarget - s.bank) * Math.min(1, dt * 10);
+
+    // --- jump buffering ---
+    if (this.input.consumeJump()) this.jumpBuf = PHYSICS.jumpBuffer;
+    else this.jumpBuf = Math.max(0, this.jumpBuf - dt);
+
+    // --- fire ---
+    if (this.input.consumeFire()) this._fire();
+
+    // --- ground interaction ---
+    const g = this._sampleGround(s.x, s.z);
+    const prevY = s.y;
+
+    if (s.grounded) {
+      if (this.jumpBuf > 0) {
+        this.jumpBuf = 0;
+        s.vy = PHYSICS.jumpVelocity;
+        s.grounded = false;
+        sfx.jump();
+      } else if (g.height === -Infinity) {
+        s.grounded = false;
+        this.coyote = PHYSICS.coyoteTime;
+        s.vy = 0;
+      } else if (g.height > s.y + PHYSICS.stepTolerance) {
+        return this._crash('wall');
+      } else if (g.height < s.y - 0.3) {
+        s.grounded = false;      // stepped off a block edge
+        this.coyote = PHYSICS.coyoteTime;
+        s.vy = 0;
+      } else {
+        s.y = g.height;
+        if (g.hazard) return this._crash('burn');
+        if (g.pad) { s.vy = PHYSICS.bouncePadVelocity; s.grounded = false; sfx.pad(); }
+        else if (g.boost && s.boostT <= BOOST.duration * 0.3) { s.boostT = BOOST.duration; sfx.boost(); }
+      }
+    } else {
+      // airborne
+      if (this.coyote > 0) {
+        this.coyote -= dt;
+        if (this.jumpBuf > 0) {
+          this.jumpBuf = 0; this.coyote = 0;
+          s.vy = PHYSICS.jumpVelocity;
+          sfx.jump();
+        }
+      }
+      s.vy -= PHYSICS.gravity * dt;
+      s.y += s.vy * dt;
+
+      if (g.height > -Infinity) {
+        if (s.vy <= 0 && prevY >= g.height - 0.02 && s.y <= g.height) {
+          // touchdown
+          s.y = g.height; s.vy = 0; s.grounded = true;
+          sfx.land();
+          if (g.hazard) return this._crash('burn');
+          if (g.pad) { s.vy = PHYSICS.bouncePadVelocity; s.grounded = false; sfx.pad(); }
+          else if (g.boost && s.boostT <= BOOST.duration * 0.3) { s.boostT = BOOST.duration; sfx.boost(); }
+        } else if (s.y < g.height - 0.05) {
+          return this._crash('wall'); // flew into a block face
+        }
+      }
+    }
+
+    if (s.y < PHYSICS.fallDeathY) return this._crash('fall');
+
+    // --- pickups ---
+    this._collectAt(s);
+
+    // --- projectiles ---
+    this._stepProjectiles(dt);
+    this._updateParticles(dt);
+
+    // --- rewind history ---
+    this._snapAcc += dt;
+    if (this._snapAcc >= 1 / REWIND.historyHz) {
+      this._snapAcc = 0;
+      this.history.push({
+        t: this.time,
+        x: s.x, y: s.y, z: s.z, vy: s.vy, vx: s.vx,
+        grounded: s.grounded, speedMul: s.speedMul, boostT: s.boostT,
+        runCoins: this.runCoins, collectedCount: this._collectedOrder.length,
+        ammo: this.ammo, destroyedCount: this._destroyedOrder.length,
+      });
+      const cap = REWIND.historyHz * REWIND.historySeconds;
+      if (this.history.length > cap) this.history.shift();
+    }
+
+    // --- finish ---
+    if (s.z >= level.length) {
+      this.state = 'complete';
+      sfx.win();
+      this.events.onComplete?.({ coins: this.runCoins, levelIndex: level.index });
+    }
+  }
+
+  // ------------------------------------------------------------------
+  _cellAt(row, lane) {
+    if (row < 0 || row >= this.level.length || lane < -3 || lane > 3) return CELL.EMPTY;
+    return this.level.rows[row][lane + 3];
+  }
+
+  _groundHeightOf(ch, key) {
+    switch (ch) {
+      case CELL.FLOOR: case CELL.BOOST: case CELL.PAD:
+      case CELL.COIN: case CELL.AMMO: case CELL.HAZARD:
+        return 0;
+      case CELL.LOW: return BLOCK_HEIGHTS.low;
+      case CELL.TALL: return BLOCK_HEIGHTS.tall;
+      case CELL.DESTRUCTIBLE: return this.destroyed.has(key) ? 0 : BLOCK_HEIGHTS.tall;
+      default: return -Infinity;
+    }
+  }
+
+  _sampleGround(x, z) {
+    const row = Math.floor(z + SHIP.noseAhead);
+    let height = -Infinity;
+    const lo = Math.max(-3, Math.ceil(x - SHIP.halfWidth - 0.5));
+    const hi = Math.min(3, Math.floor(x + SHIP.halfWidth + 0.5));
+    for (let lane = lo; lane <= hi; lane++) {
+      const h = this._groundHeightOf(this._cellAt(row, lane), row * 7 + (lane + 3));
+      if (h > height) height = h;
+    }
+    // hazard / pad / boost react to the cell under the ship's center only
+    const centerLane = Math.round(x);
+    const centerCh = this._cellAt(row, centerLane);
+    return {
+      row, height,
+      hazard: centerCh === CELL.HAZARD,
+      pad: centerCh === CELL.PAD,
+      boost: centerCh === CELL.BOOST,
+    };
+  }
+
+  _collectAt(s) {
+    const row = Math.floor(s.z + SHIP.noseAhead);
+    for (let lane = -3; lane <= 3; lane++) {
+      if (Math.abs(lane - s.x) > 0.55) continue;
+      const ch = this._cellAt(row, lane);
+      const key = row * 7 + (lane + 3);
+      if (this.collected.has(key)) continue;
+      if (ch === CELL.COIN && s.y < 0.9) {
+        this.collected.add(key); this._collectedOrder.push(key);
+        this.runCoins++; sfx.coin();
+        this._burst(lane, 0.5, row + 0.5, '#ffd24a', 6);
+      } else if (ch === CELL.COIN_AIR && Math.abs(s.y - 1.15) < 0.55) {
+        this.collected.add(key); this._collectedOrder.push(key);
+        this.runCoins++; sfx.coin();
+        this._burst(lane, 1.15, row + 0.5, '#ffd24a', 6);
+      } else if (ch === CELL.AMMO && s.y < 0.9) {
+        this.collected.add(key); this._collectedOrder.push(key);
+        this.ammo = Math.min(WEAPON.maxAmmo, this.ammo + WEAPON.ammoPerPickup);
+        sfx.ammo();
+        this._burst(lane, 0.55, row + 0.5, '#54f0ff', 6);
+      }
+    }
+  }
+
+  // ------------------------------------------------------------------
+  shoot() { this.input.queueFire(); }
+
+  _fire() {
+    if (this.state !== 'running' || this.ammo <= 0) return;
+    this.ammo--;
+    sfx.shoot();
+    this.projectiles.push({ x: this.ship.x, z: this.ship.z + 0.4, born: this.ship.z });
+  }
+
+  _stepProjectiles(dt) {
+    const speed = WEAPON.projectileSpeed + this.level.speed;
+    for (let i = this.projectiles.length - 1; i >= 0; i--) {
+      const p = this.projectiles[i];
+      const prevZ = p.z;
+      p.z += speed * dt;
+      let dead = p.z - p.born > WEAPON.projectileRange;
+      const lane = Math.round(p.x);
+      for (let row = Math.ceil(prevZ - 0.5); row <= Math.floor(p.z + 0.5) && !dead; row++) {
+        const ch = this._cellAt(row, lane);
+        const key = row * 7 + (lane + 3);
+        if (ch === CELL.DESTRUCTIBLE && !this.destroyed.has(key)) {
+          this.destroyed.add(key);
+          this._destroyedOrder.push(key);
+          this.runCoins += WEAPON.destroyReward;
+          sfx.explode();
+          this.shake = Math.max(this.shake, 0.35);
+          this._burst(lane, 0.6, row + 0.5, '#ff9500', 14);
+          this._burst(lane, 0.6, row + 0.5, '#ffffff', 6);
+          dead = true;
+        } else if (ch === CELL.TALL) {
+          dead = true; // absorbed by indestructible blocks
+        }
+      }
+      if (dead) this.projectiles.splice(i, 1);
+    }
+  }
+
+  // ------------------------------------------------------------------
+  activateSlowmo() {
+    if (this.state !== 'running' || this.slowmoLeft > 0) return false;
+    this.slowmoLeft = SLOWMO.duration;
+    this._timeScaleTarget = SLOWMO.timeScale;
+    sfx.slowmo();
+    return true;
+  }
+
+  // ------------------------------------------------------------------
+  _crash(type) {
+    this.crashType = type;
+    this.state = 'crashing';
+    this._crashTimer = 0.9;
+    this._timeScaleTarget = 0.25;
+    this.slowmoLeft = 0;
+    this.shake = 1;
+    this.shipVisible = false;
+    this.projectiles.length = 0;
+    sfx.crash();
+    const s = this.ship;
+    this._burst(s.x, s.y + 0.3, s.z, '#ffffff', 10);
+    this._burst(s.x, s.y + 0.3, s.z, this.level.theme.glow, 14);
+    this._burst(s.x, s.y + 0.3, s.z, '#ff7040', 12);
+  }
+
+  canRevive() { return this.history.length > 1; }
+
+  // Extra life: rewind REWIND.seconds and resume. Assumes the caller already
+  // paid (rewarded ad / rewind charge).
+  revive() {
+    if (this.state !== 'reviveOffer' || !this.canRevive()) return false;
+    this.revivesUsed++;
+    // target snapshot: REWIND.seconds of game time back
+    const targetT = this.time - REWIND.seconds;
+    let idx = 0;
+    for (let i = this.history.length - 1; i >= 0; i--) {
+      if (this.history[i].t <= targetT) { idx = i; break; }
+    }
+    this._rewindAnim = {
+      fromIdx: this.history.length - 1,
+      toIdx: idx,
+      progress: 0,
+      duration: 1.0,
+    };
+    this.state = 'rewinding';
+    sfx.rewind();
+    return true;
+  }
+
+  _stepRewindAnim(dtReal) {
+    const anim = this._rewindAnim;
+    anim.progress = Math.min(1, anim.progress + dtReal / anim.duration);
+    const span = anim.fromIdx - anim.toIdx;
+    const fi = anim.fromIdx - span * this._easeInOut(anim.progress);
+    const i0 = Math.max(0, Math.floor(fi));
+    const i1 = Math.min(this.history.length - 1, i0 + 1);
+    const k = fi - i0;
+    const a = this.history[i0], b = this.history[i1];
+    // ship glides backwards along its recorded path
+    this.ship.x = a.x + (b.x - a.x) * k;
+    this.ship.y = a.y + (b.y - a.y) * k;
+    this.ship.z = a.z + (b.z - a.z) * k;
+    this.shipVisible = true;
+    // ghost trail of where you'll respawn from
+    const g0 = this.history[anim.toIdx];
+    this.rewindGhosts = [{ x: g0.x, y: g0.y, z: g0.z, bank: 0 }];
+
+    if (anim.progress >= 1) {
+      const snap = this.history[anim.toIdx];
+      const s = this.ship;
+      s.x = snap.x; s.y = snap.y; s.z = snap.z;
+      s.vy = snap.vy; s.vx = snap.vx; s.bank = 0;
+      s.grounded = snap.grounded; s.speedMul = snap.speedMul; s.boostT = snap.boostT;
+      // resurrect coins / ammo / barriers taken inside the rewound window
+      while (this._collectedOrder.length > snap.collectedCount) {
+        this.collected.delete(this._collectedOrder.pop());
+      }
+      while (this._destroyedOrder.length > snap.destroyedCount) {
+        this.destroyed.delete(this._destroyedOrder.pop());
+      }
+      this.runCoins = snap.runCoins;
+      this.ammo = snap.ammo;
+      this.time = snap.t;
+      this.history.length = anim.toIdx + 1;
+      this._rewindAnim = null;
+      this.rewindGhosts = null;
+      this.particles.length = 0;
+      this.crashType = null;
+      // slow ramp back to full speed so the player can react to what killed them
+      this.timeScale = 0.3;
+      this._timeScaleTarget = 1;
+      this.state = 'running';
+      this.events.onReviveDone?.();
+    }
+  }
+
+  giveUp() {
+    if (this.state === 'reviveOffer') {
+      this.state = 'failed';
+      sfx.lose();
+    }
+  }
+
+  pause() {
+    if (this.state === 'running') { this.state = 'paused'; return true; }
+    return false;
+  }
+  resume() {
+    if (this.state === 'paused') { this.state = 'running'; this._acc = 0; }
+  }
+
+  // ------------------------------------------------------------------
+  _burst(x, y, z, color, n) {
+    for (let i = 0; i < n; i++) {
+      this.particles.push({
+        x, y, z,
+        vx: (Math.random() - 0.5) * 4,
+        vy: Math.random() * 3.5,
+        vz: (Math.random() - 0.5) * 3,
+        life: 0.4 + Math.random() * 0.5,
+        maxLife: 0.9,
+        size: 3 + Math.random() * 5,
+        color,
+      });
+    }
+  }
+
+  _updateParticles(dt) {
+    for (let i = this.particles.length - 1; i >= 0; i--) {
+      const p = this.particles[i];
+      p.life -= dt;
+      if (p.life <= 0) { this.particles.splice(i, 1); continue; }
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.z += p.vz * dt;
+      p.vy -= 7 * dt;
+    }
+  }
+
+  _easeInOut(t) { return t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2; }
+}
