@@ -5,9 +5,13 @@ export const TRACK_LANES = 7;          // lanes -3 .. +3
 export const LANE_MIN = -3;
 export const LANE_MAX = 3;
 
+export const APP_VERSION = '1.0.0';
+
 export const PHYSICS = {
-  gravity: 15.0,          // units/s^2
-  jumpVelocity: 5.0,      // units/s
+  gravity: 16.0,          // units/s^2 (falling / released)
+  holdGravity: 9.0,       // units/s^2 while rising with the jump button held
+  maxJumpHoldS: 0.5,      // sustain window for held jumps
+  jumpVelocity: 4.6,      // units/s — tap apex ~0.66, held apex ~1.18
   bouncePadVelocity: 7.4, // units/s (jump pad)
   lateralSpeed: 4.2,      // max lanes/s while steering
   lateralAccel: 26.0,     // lanes/s^2
@@ -116,7 +120,19 @@ export const PIGGY = {
   adsToOpen: 3,           // rewarded ads to crack a FULL bank without paying
 };
 
-export const BLOCK_HEIGHTS = { low: 0.55, tall: 1.15 };
+export const BLOCK_HEIGHTS = { low: 0.55, tall: 1.5, hurdle: 0.9 };
+
+export const DEBRIS = {
+  bottom: 0.95,           // floating wreckage band over normal floor
+  top: 1.5,
+  crashY: 0.75,           // ship center above this inside a debris cell = crash
+};
+
+export const RING = {
+  y: 1.05,                // torus center height (thread it with a HELD jump)
+  window: 0.4,            // |shipY - y| tolerance to count as "through"
+  reward: 5,              // coins (x flow) per ring threaded
+};
 
 // Cell type characters used by the level format.
 export const CELL = {
@@ -131,4 +147,7 @@ export const CELL = {
   HAZARD: 'X',   // burning floor — deadly to touch
   DESTRUCTIBLE: 'D', // shootable barrier — blast it or steer around it
   AMMO: 'A',     // floor with an ammo cell above it
+  HURDLE: '=',   // energy fence (0.9 high) — needs a HELD jump
+  DEBRIS: '~',   // floating wreckage over floor — tap-hop or drive UNDER it
+  RING: 'O',     // glowing ring over the void — thread it mid held-jump for coins
 };

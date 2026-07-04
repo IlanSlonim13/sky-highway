@@ -13,6 +13,7 @@ export class Input {
   constructor(surface) {
     this.axis = 0;            // -1..1 smoothed steering
     this._jumpQueued = false;
+    this.jumpHeld = false;    // true while the jump button / Space is held (sustains the jump)
     this._fireQueued = false;
     this._keys = new Set();
     this._pauseCbs = [];
@@ -56,13 +57,17 @@ export class Input {
     window.addEventListener('keydown', (e) => {
       if (e.repeat) return;
       const k = e.key.toLowerCase();
-      if (k === ' ' || k === 'arrowup' || k === 'w') { this._jumpQueued = true; e.preventDefault(); }
+      if (k === ' ' || k === 'arrowup' || k === 'w') { this.pressJump(); e.preventDefault(); }
       else if (k === 'f' || k === 'control') this._fireQueued = true;
       else if (k === 'p' || k === 'escape') this._pauseCbs.forEach((cb) => cb());
       else this._keys.add(k);
     });
-    window.addEventListener('keyup', (e) => this._keys.delete(e.key.toLowerCase()));
-    window.addEventListener('blur', () => this._keys.clear());
+    window.addEventListener('keyup', (e) => {
+      const k = e.key.toLowerCase();
+      if (k === ' ' || k === 'arrowup' || k === 'w') this.releaseJump();
+      else this._keys.delete(k);
+    });
+    window.addEventListener('blur', () => { this._keys.clear(); this.jumpHeld = false; });
   }
 
   // called once per rendered frame by the game loop
@@ -89,7 +94,11 @@ export class Input {
     this._jumpQueued = false;
     return j;
   }
+  // legacy tap jump (tap-anywhere, tests): queues without holding -> short hop
   queueJump() { this._jumpQueued = true; }
+  // press/release pair for the HUD button and keyboard: hold to jump higher
+  pressJump() { this._jumpQueued = true; this.jumpHeld = true; }
+  releaseJump() { this.jumpHeld = false; }
 
   consumeFire() {
     const f = this._fireQueued;

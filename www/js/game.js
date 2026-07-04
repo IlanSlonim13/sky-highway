@@ -7,6 +7,7 @@
 
 import {
   PHYSICS, SHIP, BOOST, SLOWMO, REWIND, CELL, BLOCK_HEIGHTS, WEAPON, FLOW, CAMERA,
+  DEBRIS, RING,
 } from './config.js';
 import { sfx } from './audio.js';
 import { EchoRecorder } from './echo.js';
@@ -41,7 +42,9 @@ export class Game {
     this.flowTimer = 0;
 
     // per-run stat deltas, applied to missions/achievements by main.js at run end
-    this.runStats = { coins: 0, airCoins: 0, barriers: 0, jumps: 0, revives: 0, slowmos: 0, maxFlow: 1, gaps: 0, nearMisses: 0 };
+    this.runStats = { coins: 0, airCoins: 0, barriers: 0, jumps: 0, revives: 0, slowmos: 0, maxFlow: 1, gaps: 0, nearMisses: 0, rings: 0 };
+    this._holdT = 0;          // seconds the current jump has been sustained
+    this._sustain = false;    // whether the current airtime responds to holding
     this._takeoffZ = null;
     this._nearMissRow = -1;
     this.trailPoints = [];
@@ -240,6 +243,8 @@ export class Game {
         this.jumpBuf = 0;
         s.vy = PHYSICS.jumpVelocity;
         s.grounded = false;
+        this._holdT = 0;
+        this._sustain = true; // hold the button to keep rising longer
         this.runStats.jumps++;
         this._takeoffZ = s.z;
         sfx.jump();
@@ -257,7 +262,7 @@ export class Game {
       } else {
         s.y = g.height;
         if (g.hazard) return this._crash('burn');
-        if (g.pad) { s.vy = PHYSICS.bouncePadVelocity; s.grounded = false; sfx.pad(); }
+        if (g.pad) { s.vy = PHYSICS.bouncePadVelocity; s.grounded = false; this._sustain = false; sfx.pad(); }
         else if (g.boost && s.boostT <= BOOST.duration * 0.3) { s.boostT = BOOST.duration; sfx.boost(); }
       }
     } else {
@@ -267,12 +272,18 @@ export class Game {
         if (this.jumpBuf > 0) {
           this.jumpBuf = 0; this.coyote = 0;
           s.vy = PHYSICS.jumpVelocity;
+          this._holdT = 0;
+          this._sustain = true;
           this.runStats.jumps++;
           this._takeoffZ = s.z;
           sfx.jump();
         }
       }
-      s.vy -= PHYSICS.gravity * dt;
+      // variable jump: reduced gravity while rising with the button held
+      const rising = s.vy > 0;
+      const sustained = rising && this._sustain && this.input.jumpHeld && this._holdT < PHYSICS.maxJumpHoldS;
+      if (sustained) this._holdT += dt;
+      s.vy -= (sustained ? PHYSICS.holdGravity : PHYSICS.gravity) * dt;
       s.y += s.vy * dt;
 
       if (g.height > -Infinity) {
@@ -286,7 +297,7 @@ export class Game {
           this._takeoffZ = null;
           sfx.land();
           if (g.hazard) return this._crash('burn');
-          if (g.pad) { s.vy = PHYSICS.bouncePadVelocity; s.grounded = false; sfx.pad(); }
+          if (g.pad) { s.vy = PHYSICS.bouncePadVelocity; s.grounded = false; this._sustain = false; sfx.pad(); }
           else if (g.boost && s.boostT <= BOOST.duration * 0.3) { s.boostT = BOOST.duration; sfx.boost(); }
         } else if (s.y < g.height - 0.05) {
           return this._crash('wall'); // flew into a block face
@@ -295,6 +306,29 @@ export class Game {
     }
 
     if (s.y < PHYSICS.fallDeathY) return this._crash('fall');
+
+    // --- debris band & ring threading (center lane) ---
+    {
+      const row = Math.floor(s.z + SHIP.noseAhead);
+      const centerLane = Math.round(s.x);
+      const centerCh = this._cellAt(row, centerLane);
+      if (centerCh === CELL.DEBRIS && s.y > DEBRIS.crashY) {
+        return this._crash('debris'); // rose into the floating wreckage
+      }
+      if (centerCh === CELL.RING) {
+        const key = row * 7 + (centerLane + 3);
+        if (!this.collected.has(key) && Math.abs(s.y - RING.y) < RING.window) {
+          this.collected.add(key); this._collectedOrder.push(key);
+          const payout = RING.reward * this.flow;
+          this.runCoins += payout;
+          this.runStats.coins += payout;
+          this.runStats.rings++;
+          this._styleEvent();
+          sfx.coin();
+          this._burst(centerLane, RING.y, row + 0.5, '#a0f4ff', 10);
+        }
+      }
+    }
 
     // --- near-miss detection (once per row) ---
     const nmRow = Math.floor(s.z + SHIP.noseAhead);
@@ -367,8 +401,10 @@ export class Game {
         return 0;
       case CELL.LOW: return BLOCK_HEIGHTS.low;
       case CELL.TALL: return BLOCK_HEIGHTS.tall;
+      case CELL.HURDLE: return BLOCK_HEIGHTS.hurdle; // wall unless cleared by a HELD jump
+      case CELL.DEBRIS: return 0;                    // normal floor under the wreckage
       case CELL.DESTRUCTIBLE: return this.destroyed.has(key) ? 0 : BLOCK_HEIGHTS.tall;
-      default: return -Infinity;
+      default: return -Infinity;                     // includes RING (floats over the void)
     }
   }
 

@@ -10,7 +10,7 @@
 // only on the ship canopy and finish gate, all big soft art pre-rendered
 // into cached offscreen canvases per theme.
 
-import { CAMERA, CELL, BLOCK_HEIGHTS, TRACK_LANES } from './config.js';
+import { CAMERA, CELL, BLOCK_HEIGHTS, TRACK_LANES, DEBRIS, RING } from './config.js';
 import { equippedShip, equippedTrail } from './cosmetics.js';
 
 const HAZARD_A = '#ff5030';
@@ -217,14 +217,18 @@ export class Renderer {
       const lanes = [];
       for (let lane = 0; lane < TRACK_LANES; lane++) {
         const ch = rowStr[lane];
-        if (ch === CELL.LOW || ch === CELL.TALL ||
+        if (ch === CELL.LOW || ch === CELL.TALL || ch === CELL.HURDLE || ch === CELL.DEBRIS ||
             (ch === CELL.DESTRUCTIBLE && !game.destroyed.has(row * 7 + lane))) lanes.push(lane);
       }
       lanes.sort((a, b) => Math.abs((b - 3) - camX) - Math.abs((a - 3) - camX));
       for (const lane of lanes) {
         const ch = rowStr[lane];
-        const hgt = ch === CELL.LOW ? BLOCK_HEIGHTS.low : BLOCK_HEIGHTS.tall;
-        this._box(ctx, px, py, lane - 3, row, hgt, ch, theme, camX, t);
+        if (ch === CELL.HURDLE) this._hurdle(ctx, px, py, lane - 3, row, theme, t);
+        else if (ch === CELL.DEBRIS) this._debris(ctx, px, py, lane - 3, row, theme, camX, t);
+        else {
+          const hgt = ch === CELL.LOW ? BLOCK_HEIGHTS.low : BLOCK_HEIGHTS.tall;
+          this._box(ctx, px, py, lane - 3, row, hgt, ch, theme, camX, t);
+        }
       }
       ctx.globalAlpha = 1;
     }
@@ -241,6 +245,8 @@ export class Renderer {
           this._coin(ctx, px, py, lane - 3, row + 0.5, y + Math.sin(t * 3 + key) * 0.05, t);
         } else if (ch === CELL.AMMO && !game.collected.has(key)) {
           this._ammoCell(ctx, px, py, lane - 3, row + 0.5, 0.55 + Math.sin(t * 3 + key) * 0.06, t);
+        } else if (ch === CELL.RING && !game.collected.has(key)) {
+          this._ring(ctx, px, py, lane - 3, row + 0.5, t);
         }
       }
     }
@@ -444,6 +450,99 @@ export class Renderer {
     ctx.lineTo(fx1, fy0);
     ctx.stroke();
     ctx.globalCompositeOperation = 'source-over';
+  }
+
+  // energy fence: two posts + a flickering additive beam at hurdle height —
+  // reads as "too tall to hop, HOLD to clear"
+  _hurdle(ctx, px, py, lx, row, theme, t) {
+    const z = row + 0.5;
+    const h = BLOCK_HEIGHTS.hurdle;
+    const flick = 0.7 + 0.3 * Math.sin(t * 18 + row * 3.1);
+    // posts at the cell edges
+    for (const side of [-0.44, 0.44]) {
+      this._quad(ctx,
+        px(lx + side - 0.05, z), py(h + 0.06, z),
+        px(lx + side + 0.05, z), py(h + 0.06, z),
+        px(lx + side + 0.05, z), py(0, z),
+        px(lx + side - 0.05, z), py(0, z),
+        this._shade(theme.blockDark, 0.9));
+    }
+    ctx.globalCompositeOperation = 'lighter';
+    // main beam
+    this._quad(ctx,
+      px(lx - 0.44, z), py(h, z), px(lx + 0.44, z), py(h, z),
+      px(lx + 0.44, z), py(h - 0.14, z), px(lx - 0.44, z), py(h - 0.14, z),
+      this._alpha('#ff5c7a', 0.55 * flick));
+    // faint field below the beam
+    this._quad(ctx,
+      px(lx - 0.44, z), py(h - 0.14, z), px(lx + 0.44, z), py(h - 0.14, z),
+      px(lx + 0.44, z), py(0, z), px(lx - 0.44, z), py(0, z),
+      this._alpha('#ff5c7a', 0.10 * flick));
+    ctx.globalCompositeOperation = 'source-over';
+  }
+
+  // floating wreckage beam: solid band the ship must stay UNDER
+  _debris(ctx, px, py, lx, row, theme, camX, t) {
+    const z0 = row, z1 = row + 1;
+    const x0 = lx - 0.5, x1 = lx + 0.5;
+    const yB = DEBRIS.bottom, yT = DEBRIS.top;
+    // shadow patch on the floor below
+    ctx.fillStyle = 'rgba(0,0,0,0.30)';
+    ctx.beginPath();
+    ctx.ellipse(px(lx, row + 0.5), py(0.01, row + 0.5),
+      Math.abs(px(lx + 0.38, row + 0.5) - px(lx, row + 0.5)),
+      Math.abs(py(0.01, row + 0.82) - py(0.01, row + 0.5)), 0, 0, 6.29);
+    ctx.fill();
+    // underside (what the player sees sliding beneath)
+    this._quad(ctx, px(x0, z0), py(yB, z0), px(x1, z0), py(yB, z0),
+      px(x1, z1), py(yB, z1), px(x0, z1), py(yB, z1), this._shade('#6a5a4a', 0.55));
+    // front face: battered wreck gradient with darker chunks
+    const fy0 = py(yT, z0), fy1 = py(yB, z0);
+    const fx0 = px(x0, z0), fx1 = px(x1, z0);
+    const fg = ctx.createLinearGradient(0, fy0, 0, fy1);
+    fg.addColorStop(0, '#8a7a66');
+    fg.addColorStop(0.6, '#5c5044');
+    fg.addColorStop(1, '#3a322a');
+    this._quad(ctx, fx0, fy0, fx1, fy0, fx1, fy1, fx0, fy1, fg);
+    ctx.fillStyle = 'rgba(0,0,0,0.30)';
+    const seed = (row * 7 + lx) | 0;
+    for (let i = 0; i < 3; i++) {
+      const u = ((seed * 31 + i * 47) % 10) / 10;
+      ctx.fillRect(fx0 + (fx1 - fx0) * u * 0.8, fy0 + (fy1 - fy0) * ((i + 1) / 4), (fx1 - fx0) * 0.14, (fy1 - fy0) * 0.16);
+    }
+    // top face
+    this._quad(ctx, px(x0, z0), py(yT, z0), px(x1, z0), py(yT, z0),
+      px(x1, z1), py(yT, z1), px(x0, z1), py(yT, z1), this._shade('#8a7a66', 1.05));
+    // hazard blink on the underside edge
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.strokeStyle = this._alpha('#ffb060', 0.35 + 0.25 * Math.sin(t * 6 + row));
+    ctx.lineWidth = 1.4;
+    ctx.beginPath();
+    ctx.moveTo(fx0, fy1);
+    ctx.lineTo(fx1, fy1);
+    ctx.stroke();
+    ctx.globalCompositeOperation = 'source-over';
+  }
+
+  // glowing ring floating over the void: thread it at the top of a held jump
+  _ring(ctx, px, py, lx, z, t) {
+    const cx = px(lx, z), cy = py(RING.y, z);
+    const rx = Math.abs(px(lx + 0.42, z) - px(lx, z));
+    const ry = rx * 1.15; // slightly taller than wide, facing the player
+    const pulse = 0.75 + 0.25 * Math.sin(t * 5 + z);
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.strokeStyle = this._alpha('#7ce8ff', 0.25 * pulse);
+    ctx.lineWidth = Math.max(3, rx * 0.30);
+    ctx.beginPath();
+    ctx.ellipse(cx, cy, rx, ry, 0, 0, 6.29);
+    ctx.stroke();
+    ctx.strokeStyle = this._alpha('#e8fbff', 0.9 * pulse);
+    ctx.lineWidth = Math.max(1.5, rx * 0.10);
+    ctx.beginPath();
+    ctx.ellipse(cx, cy, rx, ry, 0, 0, 6.29);
+    ctx.stroke();
+    ctx.restore();
   }
 
   _boostDecal(ctx, px, py, lx, row) {

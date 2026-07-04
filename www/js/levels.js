@@ -148,7 +148,9 @@ function level2() {
     .straight(5)
     .coins([0])
     .gap(2)
-    .straight(4)
+    .straight(5)
+    .gap(4)                       // wide gap: HOLD the jump to clear it
+    .straight(5)
     .floorWith(1, [[0, CELL.BOOST]])
     .straight(6)
     .floorWith(1, [[-2, CELL.LOW], [-1, CELL.LOW], [0, CELL.LOW], [1, CELL.LOW], [2, CELL.LOW]])
@@ -186,6 +188,8 @@ function level3() {
     .floorWith(2, [[1, CELL.TALL]])
     .straight(3)
     .floorWith(2, [[0, CELL.TALL], [-3, CELL.TALL], [3, CELL.TALL]])
+    .straight(4)
+    .raw(['======='])             // energy fence: needs a HELD jump
     .straight(4)
     .coins([-2, 2])
     .gap(2)
@@ -267,6 +271,9 @@ function level5() {
     .gap(4)
     .straight(5)
     .coins([0])
+    .straight(3)
+    .raw(['.......', '.......', '...O...', '.......'])  // ring at the top of the arc
+    .straight(4)
     .floorWith(1, [[-1, CELL.PAD], [0, CELL.PAD], [1, CELL.PAD]])
     .gap(5)
     .straight(5)
@@ -301,6 +308,8 @@ function level6() {
   // Narrow bridges under pressure.
   return b()
     .straight(8)
+    .floorWith(4, [[-1, CELL.DEBRIS], [0, CELL.DEBRIS], [1, CELL.DEBRIS]])
+    .straight(3)
     .bridge(6, -1, 1)
     .straight(3)
     .bridge(8, 0, 0)          // single-lane center bridge
@@ -400,6 +409,10 @@ function level8() {
     .straight(3)
     .floorWith(1, [[-2, CELL.LOW], [-1, CELL.LOW], [0, CELL.LOW], [1, CELL.LOW], [2, CELL.LOW]])
     .straight(3)
+    .raw(['======='])
+    .straight(3)
+    .floorWith(3, [[-1, CELL.DEBRIS], [0, CELL.DEBRIS], [1, CELL.DEBRIS]])
+    .straight(3)
     .gap(3)
     .straight(3)
     .floorWith(2, [[-2, CELL.TALL], [0, CELL.TALL], [2, CELL.TALL]])
@@ -488,6 +501,10 @@ function level10() {
     .straight(3)
     .raw(['DDD#DDD'])      // wall with only the center open
     .straight(3)
+    .raw(['======='])
+    .straight(4)
+    .raw(['.......', '.......', '...O...', '.......'])
+    .straight(4)
     .bridge(6, 1, 3)
     .floorWith(2, [[2, CELL.TALL]])
     .bridge(3, 1, 3)
@@ -541,12 +558,22 @@ export function levelSpeed(index) {
   return Math.min(12.5, 6.5 + index * 0.062);
 }
 
-// Max full-width gap (in rows) that a normal jump can clear at given speed,
-// with a safety margin so generated levels are strictly easier than physics allows.
-export function maxJumpGap(speed) {
-  const airtime = (2 * PHYSICS.jumpVelocity) / PHYSICS.gravity; // ~0.667s
-  return Math.max(2, Math.floor(speed * airtime) - 1);
+// Two-tier jump reach model (shared by game intuition, generator and solver).
+// Tap jump: quick hop. Held jump: reduced gravity while rising -> higher/longer.
+// Both are conservative vs the real physics so "solvable" stays a proof.
+const TAP_AIR_S = (2 * PHYSICS.jumpVelocity) / PHYSICS.gravity;                    // ~0.58s
+const HOLD_APEX = (PHYSICS.jumpVelocity ** 2) / (2 * PHYSICS.holdGravity);         // ~1.18
+const HOLD_AIR_S = PHYSICS.jumpVelocity / PHYSICS.holdGravity +
+  Math.sqrt((2 * HOLD_APEX) / PHYSICS.gravity);                                    // ~0.89s
+
+export function tapGap(speed) {
+  return Math.max(1, Math.floor(speed * TAP_AIR_S) - 1);
 }
+export function holdGap(speed) {
+  return Math.max(3, Math.floor(speed * HOLD_AIR_S) - 1);
+}
+// legacy alias (endless track difficulty ramp)
+export function maxJumpGap(speed) { return holdGap(speed); }
 
 // ---------------------------------------------------------------------------
 // TrackBuilder — the pattern-emitter machinery shared by the campaign
@@ -563,9 +590,10 @@ export function maxJumpGap(speed) {
 // rng() call order here changes every generated level.
 // ---------------------------------------------------------------------------
 class TrackBuilder {
-  constructor(rng, difficulty, jump) {
+  constructor(rng, difficulty, tapG, holdG) {
     this.rng = rng;
-    this.jump = jump;
+    this.tapG = tapG;   // rows a tap jump safely clears
+    this.holdG = holdG; // rows a held jump safely clears
     this.rows = [];
     this.path = 0; // current guaranteed-safe lane
     this.setDifficulty(difficulty);
@@ -629,18 +657,66 @@ class TrackBuilder {
   }
 
   patGap() {
-    const g = 2 + Math.floor(this.rng() * Math.max(1, this.jump - 1)); // 2..jump
-    const gap = Math.min(g, this.jump);
+    // narrow gaps are tap-able; wide gaps (more common as difficulty rises)
+    // demand a HELD jump — and often carry a ring at the top of the arc
+    const wide = this.rng() < 0.25 + 0.45 * this.difficulty;
+    const lo = wide ? this.tapG + 1 : 2;
+    const hi = wide ? this.holdG : Math.max(2, this.tapG);
+    const gap = Math.min(this.holdG, lo + Math.floor(this.rng() * Math.max(1, hi - lo + 1)));
     // runway
     for (let i = 0; i < 3; i++) this.rows.push(this.decoratedRow(this.safeSet(this.path, 3)));
-    // the gap: nothing anywhere (occasional floating coin arc over it)
+    // the gap: nothing anywhere (coin arc, or a ring mid-arc on wide gaps)
     const coinArc = this.rng() < 0.5;
+    const ring = wide && this.rng() < 0.6;
     for (let i = 0; i < gap; i++) {
       const r = emptyRow();
-      if (coinArc) r[this.path + L] = CELL.COIN_AIR;
+      if (ring && i === Math.floor(gap / 2)) r[this.path + L] = CELL.RING;
+      else if (coinArc) r[this.path + L] = CELL.COIN_AIR;
       this.rows.push(r);
     }
     // landing
+    for (let i = 0; i < 3; i++) this.rows.push(this.decoratedRow(this.safeSet(this.path, 3)));
+  }
+
+  patHurdle() {
+    // energy fence across the safe zone: too tall for a tap -> HELD jump
+    for (let i = 0; i < 3; i++) this.rows.push(this.decoratedRow(this.safeSet(this.path, 3)));
+    this.rows.push(this.decoratedRow(this.safeSet(this.path, 3), { pathChar: CELL.HURDLE }));
+    for (let i = 0; i < 3; i++) this.rows.push(this.decoratedRow(this.safeSet(this.path, 3)));
+    if (this.difficulty > 0.5 && this.rng() < 0.5) {
+      // hold-then-tap rhythm: a low block right after the fence
+      this.rows.push(this.decoratedRow(this.safeSet(this.path, 3), { pathChar: CELL.LOW }));
+      for (let i = 0; i < 3; i++) this.rows.push(this.decoratedRow(this.safeSet(this.path, 3)));
+    }
+  }
+
+  patDebris() {
+    // floating wreckage over the corridor: drive or tap-hop UNDER it (no held jumps)
+    const len = 3 + Math.floor(this.rng() * (2 + 4 * this.difficulty));
+    for (let i = 0; i < len; i++) {
+      const r = this.decoratedRow(this.safeSet(this.path, 2));
+      for (const l of this.safeSet(this.path, 2)) r[l + L] = CELL.DEBRIS;
+      this.rows.push(r);
+    }
+    for (let i = 0; i < 2; i++) this.rows.push(this.decoratedRow(this.safeSet(this.path, 3)));
+    if (this.rng() < 0.35 + 0.3 * this.difficulty) {
+      // a tap-gap right out of the no-hold zone
+      const gap = Math.min(2, this.tapG);
+      for (let i = 0; i < gap; i++) this.rows.push(emptyRow());
+      for (let i = 0; i < 3; i++) this.rows.push(this.decoratedRow(this.safeSet(this.path, 3)));
+    }
+  }
+
+  patRingJump() {
+    // a wide, held-jump-only gap with a glowing ring at the top of the arc
+    const gap = Math.min(this.holdG, this.tapG + 1 + Math.floor(this.rng() * Math.max(1, this.holdG - this.tapG)));
+    for (let i = 0; i < 3; i++) this.rows.push(this.decoratedRow(this.safeSet(this.path, 3)));
+    for (let i = 0; i < gap; i++) {
+      const r = emptyRow();
+      if (i === Math.floor(gap / 2)) r[this.path + L] = CELL.RING;
+      else if (i % 2 === 0) r[this.path + L] = CELL.COIN_AIR;
+      this.rows.push(r);
+    }
     for (let i = 0; i < 3; i++) this.rows.push(this.decoratedRow(this.safeSet(this.path, 3)));
   }
 
@@ -699,11 +775,11 @@ class TrackBuilder {
   }
 
   patBouncePad() {
-    // pad, big gap (cleared by pad's high jump), landing
+    // pad, big gap (cleared by pad's high fling), landing
     const r = this.decoratedRow(this.safeSet(this.path, 3));
     r[this.path + L] = CELL.PAD;
     this.rows.push(r);
-    const gap = Math.min(this.jump + 2, 4 + Math.floor(this.rng() * 3));
+    const gap = Math.min(this.holdG + 1, 4 + Math.floor(this.rng() * 3));
     for (let i = 0; i < gap; i++) {
       const g = emptyRow();
       if (i % 2 === 0) g[this.path + L] = CELL.COIN_AIR;
@@ -760,6 +836,9 @@ class TrackBuilder {
       [() => this.patBouncePad(), 0.5 + this.difficulty * 0.4],
       [() => this.patDestructibleWall(), 0.5 + this.difficulty * 0.6],
       [() => this.patCoinRun(), 0.7],
+      [() => this.patHurdle(), 0.4 + this.difficulty * 0.9],
+      [() => this.patDebris(), 0.3 + this.difficulty * 0.9],
+      [() => this.patRingJump(), 0.3 + this.difficulty * 0.6],
     ];
   }
 
@@ -786,7 +865,7 @@ function generateLevel(index) {
   // levels grow with progress: ~320 rows at level 11 -> ~1000 rows from level ~310 on
   const targetRows = Math.round(320 + 680 * Math.min(1, (index - 9) / 300));
 
-  const tb = new TrackBuilder(rng, difficulty, maxJumpGap(speed));
+  const tb = new TrackBuilder(rng, difficulty, tapGap(speed), holdGap(speed));
   tb.open(8);
   while (tb.rows.length < targetRows) tb.emitOne();
   tb.close(6);
@@ -802,7 +881,7 @@ export function getDailyLevel(dayKey) {
   const rng = mulberry32((0xDA117E ^ Math.imul(n, 2654435761)) >>> 0);
   const difficulty = 0.35 + rng() * 0.3;
   const speed = 8 + difficulty * 3;
-  const tb = new TrackBuilder(rng, difficulty, maxJumpGap(speed));
+  const tb = new TrackBuilder(rng, difficulty, tapGap(speed), holdGap(speed));
   tb.open(8);
   const targetRows = 420 + Math.floor(rng() * 120);
   while (tb.rows.length < targetRows) tb.emitOne();
@@ -826,7 +905,7 @@ export function getDailyLevel(dayKey) {
 // ---------------------------------------------------------------------------
 export function createEndlessTrack(seed) {
   const rng = mulberry32((0xE7D1E5 ^ Math.floor(seed)) >>> 0);
-  const tb = new TrackBuilder(rng, 0, maxJumpGap(ENDLESS.baseSpeed));
+  const tb = new TrackBuilder(rng, 0, tapGap(ENDLESS.baseSpeed), holdGap(ENDLESS.baseSpeed));
   tb.open(8);
   const rows = [];
   const flush = () => {
@@ -849,7 +928,8 @@ export function createEndlessTrack(seed) {
     ensureRows(upTo) {
       while (rows.length < upTo) {
         tb.setDifficulty(Math.min(1, rows.length / ENDLESS.rampDistance));
-        tb.jump = maxJumpGap(track.speedAt(rows.length));
+        tb.tapG = tapGap(track.speedAt(rows.length));
+        tb.holdG = holdGap(track.speedAt(rows.length));
         tb.emitOne();
         flush();
       }
@@ -895,45 +975,58 @@ export function getLevel(index) {
 // ---------------------------------------------------------------------------
 export function validateLevel(level) {
   const { rows, speed } = level;
-  const jumpRows = Math.max(2, maxJumpGap(speed)); // rows spent airborne
   const n = rows.length;
+  // Two jump kinds: 0 = tap (short hop), 1 = held (high/long), 2 = bounce pad.
+  const tapRows = Math.max(1, tapGap(speed));
+  const holdRows = Math.max(3, holdGap(speed));
+  const padRows = holdRows + 2;
   // Boost pads raise speed 1.55x for 1.6s (~15+ rows in game); model it as a
   // conservative 12-row counter that lengthens jumps by 2 rows while active.
   const BOOST_ROWS = 12;
-  const maxAir = jumpRows + 4;
+  const maxAir = padRows + 3;
 
-  const groundOK = (ch) => ch === CELL.FLOOR || ch === CELL.BOOST || ch === CELL.PAD || ch === CELL.COIN || ch === CELL.AMMO;
-  // destructibles count as walls here: levels must be completable with zero shots
-  const airOK = (ch) => ch !== CELL.TALL && ch !== CELL.DESTRUCTIBLE;
+  const groundOK = (ch) =>
+    ch === CELL.FLOOR || ch === CELL.BOOST || ch === CELL.PAD ||
+    ch === CELL.COIN || ch === CELL.AMMO || ch === CELL.DEBRIS; // floor under wreckage
+  // destructibles count as walls here: levels must be completable with zero shots.
+  // Air legality depends on the jump kind:
+  //   hurdle '=' (0.9): too high for a tap, cleared by held/pad arcs
+  //   debris '~' (band 0.95-1.5): a tap slips under; held/pad arcs rise into it
+  const airOK = (ch, kind) => {
+    if (ch === CELL.TALL || ch === CELL.DESTRUCTIBLE) return false;
+    if (ch === CELL.HURDLE) return kind !== 0;
+    if (ch === CELL.DEBRIS) return kind === 0;
+    return true;
+  };
 
   const seen = new Set();
-  const key = (row, lane, air, par, boost) =>
-    (((row * 7 + (lane + 3)) * (maxAir + 1) + air) * 2 + par) * (BOOST_ROWS + 1) + boost;
+  const key = (row, lane, air, kind, par, boost) =>
+    ((((row * 7 + (lane + 3)) * (maxAir + 1) + air) * 3 + kind) * 2 + par) * (BOOST_ROWS + 1) + boost;
 
   const queue = [];
   for (let lane = -3; lane <= 3; lane++) {
     if (groundOK(rows[0][lane + 3])) {
-      const s = [0, lane, 0, 0, 0];
+      const s = [0, lane, 0, 0, 0, 0];
       seen.add(key(...s));
       queue.push(s);
     }
   }
 
   while (queue.length) {
-    const [row, lane, air, par, boost] = queue.shift();
+    const [row, lane, air, kind, par, boost] = queue.shift();
     if (row >= n - 1) return true;
     const nextRow = row + 1;
 
-    const tryPush = (r, l, a, p) => {
+    const tryPush = (r, l, a, kd, p) => {
       if (l < -3 || l > 3 || r >= n) return;
       const ch = rows[r][l + 3];
-      if (a > 0) { if (!airOK(ch)) return; }
+      if (a > 0) { if (!airOK(ch, kd)) return; }
       else if (!groundOK(ch)) return;
       const b = a === 0 && ch === CELL.BOOST ? BOOST_ROWS : Math.max(0, boost - 1);
-      const k = key(r, l, a, p, b);
+      const k = key(r, l, a, kd, p, b);
       if (seen.has(k)) return;
       seen.add(k);
-      queue.push([r, l, a, p, b]);
+      queue.push([r, l, a, kd, p, b]);
     };
 
     if (air > 0) {
@@ -941,33 +1034,37 @@ export function validateLevel(level) {
       const landing = air === 1;
       const nextAir = landing ? 0 : air - 1;
       if (landing) {
-        tryPush(nextRow, lane, 0, 0);
+        tryPush(nextRow, lane, 0, 0, 0);
         if (par === 0) { // landing drift +-1 if the mid-air drift wasn't spent
-          tryPush(nextRow, lane - 1, 0, 0);
-          tryPush(nextRow, lane + 1, 0, 0);
+          tryPush(nextRow, lane - 1, 0, 0, 0);
+          tryPush(nextRow, lane + 1, 0, 0, 0);
         }
       } else {
-        tryPush(nextRow, lane, nextAir, par);
+        tryPush(nextRow, lane, nextAir, kind, par);
         if (par === 0) { // spend the one allowed drift
-          tryPush(nextRow, lane - 1, nextAir, 1);
-          tryPush(nextRow, lane + 1, nextAir, 1);
+          tryPush(nextRow, lane - 1, nextAir, kind, 1);
+          tryPush(nextRow, lane + 1, nextAir, kind, 1);
         }
       }
     } else {
       // grounded: forward same lane
-      tryPush(nextRow, lane, 0, 0);
+      tryPush(nextRow, lane, 0, 0, 0);
       // steer: 1 lane per 2 rows -> only when parity allows
       if (par === 0) {
-        tryPush(nextRow, lane - 1, 0, 1);
-        tryPush(nextRow, lane + 1, 0, 1);
+        tryPush(nextRow, lane - 1, 0, 0, 1);
+        tryPush(nextRow, lane + 1, 0, 0, 1);
       } else {
-        tryPush(nextRow, lane, 0, 0);
+        tryPush(nextRow, lane, 0, 0, 0);
       }
-      // jump: longer while boosted; bounce pads fling highest
+      // jumps: tap or held (longer while boosted); bounce pads fling highest
       const ch = rows[row][lane + 3];
-      const isPad = ch === CELL.PAD;
-      const airLen = isPad ? jumpRows + 3 : boost > 0 || ch === CELL.BOOST ? jumpRows + 2 : jumpRows;
-      tryPush(nextRow, lane, airLen, 0);
+      const boosted = boost > 0 || ch === CELL.BOOST ? 2 : 0;
+      if (ch === CELL.PAD) {
+        tryPush(nextRow, lane, padRows, 2, 0);
+      } else {
+        tryPush(nextRow, lane, tapRows + boosted, 0, 0);
+        tryPush(nextRow, lane, holdRows + boosted, 1, 0);
+      }
     }
   }
   return false;
