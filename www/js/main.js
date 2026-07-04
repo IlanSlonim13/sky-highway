@@ -1,7 +1,8 @@
-// Sky Highway — bootstrap and UI wiring.
+// Sky Highway — bootstrap and UI wiring (v2: modes, daily, endless, echoes,
+// missions, hangar, piggy bank, premium).
 
-import { ECONOMY, ADS, MAX_REVIVES_PER_RUN } from './config.js';
-import { getLevel, LEVEL_COUNT } from './levels.js';
+import { ECONOMY, ADS, MAX_REVIVES_PER_RUN, PIGGY, ECHO } from './config.js';
+import { getLevel, LEVEL_COUNT, getDailyLevel, createEndlessTrack } from './levels.js';
 import { save } from './save.js';
 import * as audio from './audio.js';
 import { sfx } from './audio.js';
@@ -9,7 +10,10 @@ import { Input } from './input.js';
 import { Game } from './game.js';
 import { Renderer } from './renderer.js';
 import * as ads from './ads.js';
-import { CATALOG, buyWithCoins, purchaseIAP, restorePurchases, takePendingAmmo } from './store.js';
+import { CATALOG, PIGGY_IAP, buyWithCoins, purchaseIAP, restorePurchases } from './store.js';
+import * as daily from './daily.js';
+import { EchoPlayer, echoKey, loadBestEcho, storeBestEcho } from './echo.js';
+import { SHIPS, TRAILS, ownsShip, ownsTrail, buyShip, buyTrail, equipShip, equipTrail, grantShip } from './cosmetics.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -22,12 +26,54 @@ let currentLevelIndex = 0;
 let failsSinceAd = 0;
 let winsSinceAd = 0;
 let reviveTimer = null;
+let coinsDoubled = false;          // per-results-screen: double-coins used
+let lastEarnedRunCoins = 0;        // what the double button doubles
+const sessionEchoes = new Map();   // echoKey -> last attempt recording (this session)
+
+// ---------------------------------------------------------------------------
+// Achievements
+// ---------------------------------------------------------------------------
+const ACHIEVEMENTS = [
+  { id: 'firstwin', name: 'Lift-off', test: (s) => s.stats.levelsCompleted >= 1, coins: 30 },
+  { id: 'levels10', name: 'Roadworthy', test: (s) => s.stats.levelsCompleted >= 10, coins: 100 },
+  { id: 'levels50', name: 'Highway Veteran', test: (s) => s.stats.levelsCompleted >= 50, coins: 300 },
+  { id: 'levels100', name: 'Sky Legend', test: (s) => s.stats.levelsCompleted >= 100, coins: 1000 },
+  { id: 'coins1000', name: 'Collector', test: (s) => s.stats.coinsCollected >= 1000, coins: 100 },
+  { id: 'barriers50', name: 'Demolition', test: (s) => s.stats.barriersDestroyed >= 50, coins: 150 },
+  { id: 'streak3', name: 'Regular', test: (s) => s.streak.count >= 3, coins: 60 },
+  { id: 'streak7', name: 'Devoted', test: (s) => s.streak.count >= 7, coins: 150, ship: 'ember' },
+  { id: 'streak30', name: 'Unbreakable', test: (s) => s.streak.count >= 30, coins: 500 },
+  { id: 'echo10', name: 'Time Rival', test: (s) => s.stats.echoBeats >= 10, coins: 200 },
+  { id: 'dist1000', name: 'Deep Space', test: (s) => s.stats.bestDistance >= 1000, coins: 200 },
+  { id: 'flowmax', name: 'Flow State', test: (s) => s.stats.maxFlow >= 5, coins: 100 },
+];
+
+function checkAchievements() {
+  const d = save.get();
+  for (const a of ACHIEVEMENTS) {
+    if (!d.achievements[a.id] && a.test(d)) {
+      save.grantAchievement(a.id);
+      if (a.coins) save.addCoins(a.coins);
+      if (a.ship) grantShip(a.ship);
+      toast(`🏅 ${a.name}${a.coins ? ` · +◆${a.coins}` : ''}${a.ship ? ' · new ship!' : ''}`);
+    }
+  }
+}
+
+function toast(text) {
+  const el = document.createElement('div');
+  el.className = 'toast';
+  el.textContent = text;
+  document.body.appendChild(el);
+  setTimeout(() => el.classList.add('show'), 30);
+  setTimeout(() => { el.classList.remove('show'); setTimeout(() => el.remove(), 400); }, 2600);
+}
 
 // ---------------------------------------------------------------------------
 // Screen management: one base screen + at most one overlay.
 // ---------------------------------------------------------------------------
-const BASE_SCREENS = ['screen-menu', 'screen-levels', 'screen-store', 'hud'];
-const OVERLAYS = ['screen-pause', 'screen-revive', 'screen-complete', 'screen-failed'];
+const BASE_SCREENS = ['screen-menu', 'screen-levels', 'screen-store', 'screen-hangar', 'hud'];
+const OVERLAYS = ['screen-pause', 'screen-revive', 'screen-complete', 'screen-failed', 'screen-daily'];
 
 function showBase(id) {
   for (const s of BASE_SCREENS) $(s).classList.toggle('visible', s === id);
@@ -36,6 +82,7 @@ function showBase(id) {
   if (inMenus) {
     startAttract();
     if (ads.adsAvailable()) ads.showBanner();
+    if (id === 'screen-menu') refreshMenu();
   } else {
     ads.hideBanner();
   }
@@ -51,14 +98,9 @@ function hideOverlay() {
 
 function refreshWallets() {
   const coins = save.get().coins;
-  $('menu-coins').textContent = coins;
-  $('levels-coins').textContent = coins;
-  $('store-coins').textContent = coins;
+  for (const id of ['menu-coins', 'levels-coins', 'store-coins', 'hangar-coins']) $(id).textContent = coins;
 }
 
-// ---------------------------------------------------------------------------
-// Attract mode (menu background)
-// ---------------------------------------------------------------------------
 function startAttract() {
   if (!game.attract || game.state !== 'attract') {
     game.loadLevel(getLevel(2), { attract: true });
@@ -66,16 +108,171 @@ function startAttract() {
 }
 
 // ---------------------------------------------------------------------------
-// Gameplay flow
+// Menu
 // ---------------------------------------------------------------------------
-function playLevel(index) {
-  currentLevelIndex = index;
-  game.loadLevel(getLevel(index), { startAmmo: takePendingAmmo() });
+function refreshMenu() {
+  const d = save.get();
+  const info = daily.streakInfo();
+  $('daily-streak').textContent = `🔥${info.count}`;
+  const attempts = daily.attemptsLeft();
+  $('daily-sub').textContent = daily.completedToday()
+    ? `done today · next in ${countdownText()}`
+    : `${attempts} attempt${attempts === 1 ? '' : 's'} left today`;
+  $('campaign-sub').textContent = `${Math.min(LEVEL_COUNT, d.unlocked)}/${LEVEL_COUNT} unlocked`;
+  $('endless-sub').textContent = d.endlessBest.distance > 0
+    ? `best ${d.endlessBest.distance}m · score ${d.endlessBest.score}`
+    : 'endless · ever faster';
+
+  // missions strip
+  const strip = $('mission-strip');
+  strip.innerHTML = '';
+  for (const m of daily.todaysMissions()) {
+    const chip = document.createElement('div');
+    chip.className = 'mission-chip' + (m.done ? ' mdone' : '');
+    chip.innerHTML = `${m.claimed ? '✅' : m.done ? '🎁' : '🎯'} ${m.desc}<span class="mprog">${m.progress}/${m.target}</span>`;
+    strip.appendChild(chip);
+  }
+
+  // piggy chip
+  $('piggy-chip').hidden = d.bank <= 0;
+  $('piggy-fill').textContent = d.bank;
+  $('piggy-cap').textContent = PIGGY.cap;
+}
+
+function countdownText() {
+  const ms = daily.msUntilNextDaily();
+  const h = Math.floor(ms / 3600000), m = Math.floor((ms % 3600000) / 60000);
+  return `${h}h ${m}m`;
+}
+
+// ---------------------------------------------------------------------------
+// Gameplay flows
+// ---------------------------------------------------------------------------
+function echoPlayerFor(level) {
+  const best = loadBestEcho(level);
+  if (best) { best.completedRun = !level.endless; return best; }
+  const session = sessionEchoes.get(echoKey(level));
+  if (session) {
+    const p = new EchoPlayer(session);
+    p.completedRun = false;
+    return p;
+  }
+  return null;
+}
+
+function launch(level) {
+  coinsDoubled = false;
+  game.loadLevel(level, {
+    startAmmo: save.takePendingAmmo(),
+    echoPlayer: echoPlayerFor(level),
+  });
   showBase('hud');
-  $('progress-label').textContent = `LEVEL ${index + 1}`;
+  $('progress-label').textContent = level.name.toUpperCase();
   game.start();
 }
 
+function playCampaign(index) {
+  currentLevelIndex = index;
+  launch(getLevel(index));
+}
+
+function playDaily() {
+  if (!daily.consumeAttempt()) { openDailyModal(); return; }
+  hideOverlay();
+  launch(getDailyLevel(daily.todayKey()));
+}
+
+function playEndless() {
+  // the endless track rotates daily: same seed for everyone, echoes stay valid
+  const seed = Number(daily.todayKey().replace(/-/g, ''));
+  launch(createEndlessTrack(seed));
+}
+
+function replayCurrent() {
+  if (game.mode === 'daily') playDaily();
+  else if (game.mode === 'endless') playEndless();
+  else playCampaign(currentLevelIndex);
+}
+
+// ---------------------------------------------------------------------------
+// Run end: shared bookkeeping (missions, stats, piggy, echoes)
+// ---------------------------------------------------------------------------
+function applyRunStats(completed) {
+  const rs = game.runStats;
+  daily.missionEvent('coins', rs.coins);
+  daily.missionEvent('barriers', rs.barriers);
+  daily.missionEvent('jumps', rs.jumps);
+  daily.missionEvent('airCoins', rs.airCoins);
+  daily.missionEvent('slowmos', rs.slowmos);
+  daily.missionEvent('revives', rs.revives);
+  daily.missionEvent('maxFlow', rs.maxFlow);
+  if (game.mode === 'campaign' && completed) daily.missionEvent('levels', 1);
+  if (game.mode === 'endless') daily.missionEvent('runDistance', game.distance);
+  if (game.beatEcho) daily.missionEvent('echoBeats', 1);
+
+  save.update((d) => {
+    d.stats.coinsCollected += rs.coins;
+    d.stats.barriersDestroyed += rs.barriers;
+    d.stats.jumps += rs.jumps;
+    d.stats.revives += rs.revives;
+    d.stats.maxFlow = Math.max(d.stats.maxFlow, rs.maxFlow);
+    if (completed) d.stats.levelsCompleted += game.mode === 'campaign' ? 1 : 0;
+    if (game.beatEcho) d.stats.echoBeats++;
+    if (game.mode === 'endless') d.stats.bestDistance = Math.max(d.stats.bestDistance, game.distance);
+  });
+}
+
+function keepEcho(completed) {
+  if (!game.recorder || game.recorder.samples.length < 8) return;
+  const rec = game.recorder.finish();
+  sessionEchoes.set(echoKey(game.level), rec);
+  storeBestEcho(game.level, rec, { completed, distance: game.distance });
+}
+
+function grantRunCoins(base) {
+  lastEarnedRunCoins = base;
+  const granted = save.addCoins(base);
+  save.feedBank(granted, PIGGY.cap, PIGGY.rate);
+  return granted;
+}
+
+function renderMissionTicks(containerId) {
+  const wrap = $(containerId);
+  wrap.innerHTML = '';
+  for (const m of daily.todaysMissions()) {
+    const row = document.createElement('div');
+    row.className = 'mission-tick' + (m.done && !m.claimed ? ' done-row' : '');
+    const status = m.claimed ? '✅' : m.done ? '🎁' : `${m.progress}/${m.target}`;
+    row.innerHTML = `<span>${m.desc}</span><span class="tick-actions">${status}</span>`;
+    if (m.done && !m.claimed) {
+      const actions = row.querySelector('.tick-actions');
+      actions.innerHTML = '';
+      const claim = document.createElement('button');
+      claim.className = 'claim';
+      claim.textContent = `◆${m.reward}`;
+      claim.addEventListener('click', () => {
+        daily.claimMission(m.id, 1);
+        sfx.coin(); refreshWallets(); renderMissionTicks(containerId);
+      });
+      const claim2 = document.createElement('button');
+      claim2.className = 'claim';
+      claim2.textContent = `🎬 ◆${m.reward * 2}`;
+      claim2.addEventListener('click', async () => {
+        if (await ads.showRewarded()) {
+          daily.claimMission(m.id, 2);
+          sfx.coin(); refreshWallets();
+        }
+        renderMissionTicks(containerId);
+      });
+      actions.append(claim, claim2);
+    }
+    wrap.appendChild(row);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Complete / failed screens
+// ---------------------------------------------------------------------------
 game.events.onCrash = () => {
   failsSinceAd++;
   if (game.revivesUsed >= MAX_REVIVES_PER_RUN || !game.canRevive()) {
@@ -86,14 +283,41 @@ game.events.onCrash = () => {
   openReviveModal();
 };
 
-game.events.onComplete = async ({ coins }) => {
-  const bonus = ECONOMY.levelCompleteBonusBase + currentLevelIndex;
-  const total = coins + bonus;
-  save.addCoins(total);
-  save.recordBest(currentLevelIndex, 100, coins);
-  save.unlockThrough(Math.min(LEVEL_COUNT, currentLevelIndex + 2));
-  $('complete-stats').textContent = `◆ ${coins} collected + ◆ ${bonus} bonus = ◆ ${total}`;
-  $('btn-next').style.display = currentLevelIndex + 1 < LEVEL_COUNT ? '' : 'none';
+game.events.onComplete = async ({ coins, beatEcho }) => {
+  applyRunStats(true);
+  keepEcho(true);
+
+  let breakdown = [];
+  let total = coins;
+  if (beatEcho) { total += ECHO.beatBonus; breakdown.push(`👻 echo beaten +◆${ECHO.beatBonus}`); }
+
+  if (game.mode === 'daily') {
+    const medal = daily.medalFor(coins, countLevelCoins(game.level));
+    const credit = daily.creditDailyCompletion(medal);
+    total += credit.coins + credit.chest;
+    $('complete-title').textContent = `${medal.toUpperCase()} MEDAL!`;
+    breakdown.push(`◆ ${coins} collected`);
+    if (credit.coins) breakdown.push(`🔥 streak ${credit.streak} +◆${credit.coins}`);
+    if (credit.chest) breakdown.push(`🎁 streak chest +◆${credit.chest}`);
+    $('btn-next').style.display = 'none';
+  } else {
+    const bonus = ECONOMY.levelCompleteBonusBase + currentLevelIndex;
+    total += bonus;
+    $('complete-title').textContent = 'LEVEL COMPLETE!';
+    breakdown.push(`◆ ${coins} collected + ◆ ${bonus} bonus`);
+    save.recordBest(currentLevelIndex, 100, coins);
+    save.unlockThrough(Math.min(LEVEL_COUNT, currentLevelIndex + 2));
+    $('btn-next').style.display = currentLevelIndex + 1 < LEVEL_COUNT ? '' : 'none';
+  }
+
+  grantRunCoins(total);
+  $('echo-banner').hidden = !beatEcho;
+  $('complete-stats').textContent = `${breakdown.join(' · ')} = ◆ ${total}`;
+  $('btn-double').style.display = total > 0 && ads.adsAvailable() ? '' : 'none';
+  $('btn-double').disabled = false;
+  renderMissionTicks('complete-missions');
+  checkAchievements();
+  maybeAskReview();
   winsSinceAd++;
   showOverlay('screen-complete');
   refreshWallets();
@@ -104,16 +328,68 @@ game.events.onComplete = async ({ coins }) => {
 };
 
 async function showFailed() {
-  $('failed-stats').textContent = `made it ${Math.round(game.progress * 100)}% of the way · ◆ ${game.runCoins} lost with the ship`;
+  applyRunStats(false);
+  keepEcho(false);
+
+  const salvaged = game.runCoins;
+  grantRunCoins(salvaged);
+
+  if (game.mode === 'endless') {
+    const d = save.get();
+    const isBest = game.distance > d.endlessBest.distance;
+    if (isBest) {
+      save.update((s) => { s.endlessBest = { distance: game.distance, score: game.score }; });
+    }
+    $('failed-title').textContent = 'RUN OVER';
+    $('newbest-banner').hidden = !isBest;
+    $('failed-stats').textContent =
+      `${game.distance}m · score ${game.score} · ◆ ${salvaged} salvaged` +
+      (isBest ? '' : ` · best ${d.endlessBest.distance}m`);
+  } else {
+    $('failed-title').textContent = 'SHIP LOST';
+    $('newbest-banner').hidden = true;
+    $('failed-stats').textContent =
+      `made it ${Math.round(game.progress * 100)}% of the way · ◆ ${salvaged} salvaged`;
+  }
+  $('btn-double-fail').style.display = salvaged > 0 && ads.adsAvailable() ? '' : 'none';
+  $('btn-double-fail').disabled = false;
+  renderMissionTicks('failed-missions');
+  checkAchievements();
   showOverlay('screen-failed');
+  refreshWallets();
   if (failsSinceAd >= ADS.interstitialEveryNFails) {
     failsSinceAd = 0;
     await ads.showInterstitial();
   }
 }
 
+function countLevelCoins(level) {
+  let n = 0;
+  for (const row of level.rows) for (const ch of row) if (ch === 'C' || ch === 'c') n++;
+  return n || 1;
+}
+
+// double-coins rewarded button (both screens)
+async function doubleCoins(btn) {
+  if (coinsDoubled || lastEarnedRunCoins <= 0) return;
+  btn.disabled = true;
+  if (await ads.showRewarded()) {
+    coinsDoubled = true;
+    const granted = save.addCoins(lastEarnedRunCoins);
+    save.feedBank(granted, PIGGY.cap, PIGGY.rate);
+    sfx.win();
+    toast(`🎬 coins doubled! +◆${granted}`);
+    refreshWallets();
+    btn.style.display = 'none';
+  } else {
+    btn.disabled = false;
+  }
+}
+$('btn-double').addEventListener('click', (e) => doubleCoins(e.currentTarget));
+$('btn-double-fail').addEventListener('click', (e) => doubleCoins(e.currentTarget));
+
 // ---------------------------------------------------------------------------
-// Revive (extra life) modal
+// Revive (extra life) modal — unchanged flow, ad-first
 // ---------------------------------------------------------------------------
 const CRASH_LINES = {
   wall: 'SMASHED INTO A BARRIER',
@@ -123,7 +399,9 @@ const CRASH_LINES = {
 
 function openReviveModal() {
   $('revive-title').textContent = CRASH_LINES[game.crashType] || 'CRASHED!';
-  $('revive-sub').textContent = `${Math.round(game.progress * 100)}% of the way there`;
+  $('revive-sub').textContent = game.mode === 'endless'
+    ? `${game.distance}m — keep the run alive!`
+    : `${Math.round(game.progress * 100)}% of the way there`;
   $('btn-revive-ad').style.display = ads.adsAvailable() ? '' : 'none';
   const charges = save.get().rewindCharges;
   $('revive-charges').textContent = charges;
@@ -162,15 +440,13 @@ $('btn-revive-ad').addEventListener('click', async () => {
   sfx.click();
   const earned = await ads.showRewarded();
   if (earned) doRevive();
-  else openReviveModal(); // dismissed early — offer again with a fresh countdown
+  else openReviveModal();
 });
-
 $('btn-revive-charge').addEventListener('click', () => {
   stopReviveTimer();
   sfx.click();
   if (save.useRewind()) doRevive();
 });
-
 $('btn-revive-buy').addEventListener('click', () => {
   stopReviveTimer();
   sfx.click();
@@ -179,13 +455,75 @@ $('btn-revive-buy').addEventListener('click', () => {
     doRevive();
   }
 });
-
 $('btn-giveup').addEventListener('click', () => {
   stopReviveTimer();
   sfx.click();
   hideOverlay();
   game.giveUp();
   showFailed();
+});
+
+// ---------------------------------------------------------------------------
+// Daily modal
+// ---------------------------------------------------------------------------
+function openDailyModal() {
+  daily.ensureDailyState();
+  const info = daily.streakInfo();
+  const attempts = daily.attemptsLeft();
+
+  const cal = $('daily-calendar');
+  cal.innerHTML = '';
+  const medalIcon = { gold: '🥇', silver: '🥈', bronze: '🥉' };
+  daily.medalCalendar().forEach((c, i) => {
+    const cell = document.createElement('div');
+    cell.className = 'daily-cell' + (i === 6 ? ' today' : '');
+    cell.innerHTML = `<span class="medal">${c.medal ? medalIcon[c.medal] : '·'}</span>${c.day.slice(8)}`;
+    cal.appendChild(cell);
+  });
+
+  $('daily-attempts').textContent = attempts;
+  $('daily-streak-big').textContent = `🔥${info.count}`;
+
+  const saver = $('daily-saver');
+  saver.hidden = !(info.broken && info.restorable);
+  if (!saver.hidden) {
+    $('saver-count').textContent = info.rawCount;
+    $('btn-saver-coins').style.display = save.get().coins >= 200 ? '' : 'none';
+  }
+
+  $('btn-daily-play').disabled = attempts <= 0;
+  $('btn-daily-play').textContent = attempts > 0 ? '▶ FLY' : `NEW RUN IN ${countdownText()}`;
+  $('btn-daily-ad-attempt').style.display =
+    attempts <= 0 && daily.canWatchAdForAttempt() && ads.adsAvailable() ? '' : 'none';
+
+  showOverlay('screen-daily');
+}
+
+$('card-daily').addEventListener('click', () => { sfx.click(); openDailyModal(); });
+$('btn-daily-play').addEventListener('click', () => { sfx.click(); playDaily(); });
+$('btn-daily-ad-attempt').addEventListener('click', async () => {
+  sfx.click();
+  if (await ads.showRewarded()) {
+    daily.grantAdAttempt();
+    toast('🎬 +1 attempt');
+  }
+  openDailyModal();
+});
+$('btn-saver-ad').addEventListener('click', async () => {
+  sfx.click();
+  if (await ads.showRewarded()) {
+    daily.restoreStreak();
+    toast('🔥 streak restored!');
+  }
+  openDailyModal();
+});
+$('btn-saver-coins').addEventListener('click', () => {
+  sfx.click();
+  if (save.spendCoins(200) && daily.restoreStreak()) {
+    toast('🔥 streak restored!');
+    refreshWallets();
+  }
+  openDailyModal();
 });
 
 // ---------------------------------------------------------------------------
@@ -199,7 +537,7 @@ $('btn-slowmo').addEventListener('pointerdown', (e) => {
   if (save.get().slowmoCharges > 0) {
     if (game.activateSlowmo()) save.useSlowmo();
   } else {
-    sfx.click(); // no charges — nudge toward the store
+    sfx.click();
     const btn = $('btn-slowmo');
     btn.style.borderColor = '#ff5c7a';
     setTimeout(() => (btn.style.borderColor = ''), 350);
@@ -215,27 +553,35 @@ input.onPause(() => {
 });
 
 $('btn-resume').addEventListener('click', () => { sfx.click(); hideOverlay(); game.resume(); });
-$('btn-restart').addEventListener('click', () => { sfx.click(); playLevel(currentLevelIndex); });
+$('btn-restart').addEventListener('click', () => { sfx.click(); replayCurrent(); });
 $('btn-quit').addEventListener('click', () => { sfx.click(); showBase('screen-menu'); });
 
 function syncHud() {
   if (!$('hud').classList.contains('visible')) return;
-  $('progress-fill').style.width = `${game.progress * 100}%`;
+  if (game.mode === 'endless') {
+    $('progress-fill').style.width = '0%';
+    $('progress-label').textContent = `${game.distance} m`;
+  } else {
+    $('progress-fill').style.width = `${game.progress * 100}%`;
+  }
   $('hud-coins').textContent = game.runCoins;
   $('ammo-count').textContent = game.ammo;
   $('btn-fire').disabled = game.ammo <= 0;
   const sm = save.get().slowmoCharges;
   $('slowmo-count').textContent = game.slowmoLeft > 0 ? Math.ceil(game.slowmoLeft) : sm;
   $('btn-slowmo').classList.toggle('active', game.slowmoLeft > 0);
+  const chip = $('flow-chip');
+  chip.textContent = `×${game.flow}`;
+  chip.classList.toggle('hot', game.flow > 1);
 }
 
 // ---------------------------------------------------------------------------
-// Screens: complete / failed
+// Results buttons
 // ---------------------------------------------------------------------------
-$('btn-next').addEventListener('click', () => { sfx.click(); playLevel(currentLevelIndex + 1); });
-$('btn-replay').addEventListener('click', () => { sfx.click(); playLevel(currentLevelIndex); });
+$('btn-next').addEventListener('click', () => { sfx.click(); playCampaign(currentLevelIndex + 1); });
+$('btn-replay').addEventListener('click', () => { sfx.click(); replayCurrent(); });
 $('btn-complete-menu').addEventListener('click', () => { sfx.click(); showBase('screen-menu'); });
-$('btn-retry').addEventListener('click', () => { sfx.click(); playLevel(currentLevelIndex); });
+$('btn-retry').addEventListener('click', () => { sfx.click(); replayCurrent(); });
 $('btn-failed-menu').addEventListener('click', () => { sfx.click(); showBase('screen-menu'); });
 
 // ---------------------------------------------------------------------------
@@ -255,16 +601,105 @@ function buildLevelGrid() {
     } else {
       cell.innerHTML = `${i + 1}${b ? `<span class="best">${Math.round(b.pct)}%</span>` : ''}`;
       if (b && b.pct >= 100) cell.classList.add('done');
-      cell.addEventListener('click', () => { sfx.click(); playLevel(i); });
+      cell.addEventListener('click', () => { sfx.click(); playCampaign(i); });
     }
     grid.appendChild(cell);
   }
 }
 
 // ---------------------------------------------------------------------------
+// Hangar
+// ---------------------------------------------------------------------------
+function buildHangar() {
+  const shipWrap = $('hangar-ships');
+  shipWrap.innerHTML = '';
+  const equippedShipId = save.get().cosmetics.ship;
+  for (const s of SHIPS) {
+    const owned = ownsShip(s.id);
+    const row = document.createElement('div');
+    row.className = 'store-item' + (equippedShipId === s.id ? ' equipped' : '');
+    const swatch = `<div class="swatch" style="color:${s.color || '#c86bff'};background:${s.color || 'linear-gradient(45deg,#c86bff,#54f0ff)'}"></div>`;
+    let action;
+    if (equippedShipId === s.id) action = `<button class="buy equipped-btn" disabled>FLYING</button>`;
+    else if (owned) action = `<button class="buy" data-equip-ship="${s.id}">EQUIP</button>`;
+    else if (s.unlock.type === 'coins') action = `<button class="buy gold" data-buy-ship="${s.id}">◆ ${s.unlock.price}</button>`;
+    else action = `<button class="buy" disabled>${s.unlock.label}</button>`;
+    row.innerHTML = `${swatch}<div class="info"><div class="name">${s.name}</div><div class="desc">${s.desc}</div></div>${action}`;
+    shipWrap.appendChild(row);
+  }
+
+  const trailWrap = $('hangar-trails');
+  trailWrap.innerHTML = '';
+  const equippedTrailId = save.get().cosmetics.trail;
+  for (const t of TRAILS) {
+    const owned = ownsTrail(t.id);
+    const row = document.createElement('div');
+    row.className = 'store-item' + (equippedTrailId === t.id ? ' equipped' : '');
+    let action;
+    if (equippedTrailId === t.id) action = `<button class="buy equipped-btn" disabled>ACTIVE</button>`;
+    else if (owned) action = `<button class="buy" data-equip-trail="${t.id}">EQUIP</button>`;
+    else if (t.unlock.type === 'coins') action = `<button class="buy gold" data-buy-trail="${t.id}">◆ ${t.unlock.price}</button>`;
+    else action = `<button class="buy" disabled>${t.unlock.label}</button>`;
+    row.innerHTML = `<div class="swatch" style="color:${t.color};background:${t.color}"></div><div class="info"><div class="name">${t.name}</div></div>${action}`;
+    trailWrap.appendChild(row);
+  }
+
+  // one delegated handler
+  $('screen-hangar').onclick = (e) => {
+    const b = e.target.closest('button');
+    if (!b) return;
+    if (b.dataset.equipShip) { equipShip(b.dataset.equipShip); sfx.click(); }
+    else if (b.dataset.equipTrail) { equipTrail(b.dataset.equipTrail); sfx.click(); }
+    else if (b.dataset.buyShip) { if (buyShip(b.dataset.buyShip)) sfx.win(); else sfx.click(); }
+    else if (b.dataset.buyTrail) { if (buyTrail(b.dataset.buyTrail)) sfx.win(); else sfx.click(); }
+    else return;
+    refreshWallets();
+    buildHangar();
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Store
 // ---------------------------------------------------------------------------
 function buildStore() {
+  // piggy bank card
+  const piggyWrap = $('store-piggy');
+  const d = save.get();
+  piggyWrap.innerHTML = '';
+  const full = d.bank >= PIGGY.cap;
+  const piggyRow = document.createElement('div');
+  piggyRow.className = 'store-item';
+  piggyRow.innerHTML = `
+    <div class="ico">🐷</div>
+    <div class="info"><div class="name">Piggy Bank ◆${d.bank}/${PIGGY.cap}</div>
+    <div class="desc">10% of everything you earn piles up in here</div></div>`;
+  if (d.bank > 0) {
+    const crack = document.createElement('button');
+    crack.className = 'buy gold';
+    crack.textContent = PIGGY_IAP.price;
+    crack.addEventListener('click', async () => {
+      if (await purchaseIAP('piggy')) { sfx.win(); refreshWallets(); buildStore(); }
+    });
+    piggyRow.appendChild(crack);
+    if (full) {
+      const adBtn = document.createElement('button');
+      adBtn.className = 'buy';
+      adBtn.textContent = `🎬 ${d.bankAdViews}/${PIGGY.adsToOpen}`;
+      adBtn.addEventListener('click', async () => {
+        if (await ads.showRewarded()) {
+          save.update((s) => { s.bankAdViews++; });
+          if (save.get().bankAdViews >= PIGGY.adsToOpen) {
+            const amount = save.crackBank();
+            toast(`🐷 bank cracked! +◆${amount}`);
+          }
+          refreshWallets(); buildStore();
+        }
+      });
+      piggyRow.appendChild(adBtn);
+    }
+  }
+  piggyWrap.appendChild(piggyRow);
+
   const coinWrap = $('store-coin-items');
   coinWrap.innerHTML = '';
   for (const item of CATALOG.coinItems) {
@@ -281,7 +716,11 @@ function buildStore() {
     'WATCH',
     async () => {
       const earned = await ads.showRewarded();
-      if (earned) { save.addCoins(ADS.rewardedCoinReward); sfx.coin(); refreshWallets(); buildStore(); }
+      if (earned) {
+        const granted = save.addCoins(ADS.rewardedCoinReward);
+        save.feedBank(granted, PIGGY.cap, PIGGY.rate);
+        sfx.coin(); refreshWallets(); buildStore();
+      }
     },
     !ads.adsAvailable(),
   ));
@@ -289,9 +728,9 @@ function buildStore() {
   const iapWrap = $('store-iap-items');
   iapWrap.innerHTML = '';
   for (const item of CATALOG.iapItems) {
-    if (item.id === 'removeads' && save.get().adsRemoved) continue;
+    if (item.owned && item.owned()) continue;
     iapWrap.appendChild(storeRow(item, item.price, async () => {
-      if (await purchaseIAP(item.id)) { sfx.win(); refreshWallets(); buildStore(); }
+      if (await purchaseIAP(item.id)) { sfx.win(); refreshWallets(); refreshMenu(); buildStore(); }
     }, false, true));
   }
 }
@@ -314,15 +753,53 @@ $('btn-restore').addEventListener('click', async () => {
 });
 
 // ---------------------------------------------------------------------------
-// Menu
+// Native niceties (no-ops on web)
 // ---------------------------------------------------------------------------
-$('btn-play').addEventListener('click', () => { sfx.click(); buildLevelGrid(); showBase('screen-levels'); });
+function isNative() {
+  return !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
+}
+
+// after the first daily completion, ask once to schedule streak reminders
+async function maybeScheduleNotifications() {
+  const d = save.get();
+  if (!isNative() || d.notifAsked || d.stats.dailiesCompleted < 1) return;
+  save.update((s) => { s.notifAsked = true; });
+  try {
+    const LN = window.Capacitor?.Plugins?.LocalNotifications;
+    if (!LN) return;
+    const perm = await LN.requestPermissions();
+    if (perm.display !== 'granted') return;
+    await LN.schedule({
+      notifications: [{
+        id: 1,
+        title: 'Sky Highway',
+        body: "Today's Run is live — keep your streak alive! 🔥",
+        schedule: { on: { hour: 19, minute: 0 }, repeats: true },
+      }],
+    });
+  } catch { /* plugin absent */ }
+}
+
+function maybeAskReview() {
+  const d = save.get();
+  if (d.reviewShown || d.stats.levelsCompleted < 3) return;
+  save.update((s) => { s.reviewShown = true; });
+  if (!isNative()) return;
+  try { window.Capacitor?.Plugins?.RateApp?.requestReview?.(); } catch { /* plugin absent */ }
+}
+
+// ---------------------------------------------------------------------------
+// Menu wiring
+// ---------------------------------------------------------------------------
+$('card-campaign').addEventListener('click', () => { sfx.click(); buildLevelGrid(); showBase('screen-levels'); });
+$('card-endless').addEventListener('click', () => { sfx.click(); playEndless(); });
+$('btn-hangar').addEventListener('click', () => { sfx.click(); buildHangar(); showBase('screen-hangar'); });
 $('btn-store').addEventListener('click', () => { sfx.click(); buildStore(); showBase('screen-store'); });
 document.querySelectorAll('[data-back]').forEach((b) =>
   b.addEventListener('click', () => { sfx.click(); showBase('screen-menu'); }));
 
 function syncSoundButton() {
-  $('btn-sound').textContent = save.get().sound ? '🔊 SOUND ON' : '🔇 SOUND OFF';
+  $('btn-sound').textContent = save.get().sound ? '🔊' : '🔇';
 }
 $('btn-sound').addEventListener('click', () => {
   const v = !save.get().sound;
@@ -354,7 +831,9 @@ document.addEventListener('visibilitychange', () => {
 ads.initAds(save.get().adsRemoved);
 ads.setAdsRemoved(save.get().adsRemoved);
 syncSoundButton();
+daily.ensureDailyState();
 showBase('screen-menu');
+maybeScheduleNotifications();
 
 let lastT = performance.now();
 function loop(now) {
@@ -372,16 +851,19 @@ requestAnimationFrame(loop);
 // ---------------------------------------------------------------------------
 if (location.search.includes('debug')) {
   window.__shq = {
-    game, input, save, renderer,
-    playLevel,
+    game, input, save, renderer, daily, sessionEchoes,
+    playLevel: playCampaign,
+    playDaily, playEndless, openDailyModal, refreshMenu,
     win() { game.ship.z = game.level.length - 0.5; },
     crash() { game._crash('wall'); },
     state() {
       return {
-        state: game.state, z: game.ship.z, x: game.ship.x, y: game.ship.y,
-        progress: game.progress, coins: game.runCoins, ammo: game.ammo,
+        state: game.state, mode: game.mode, z: game.ship.z, x: game.ship.x, y: game.ship.y,
+        progress: game.progress, distance: game.distance, score: game.score,
+        coins: game.runCoins, ammo: game.ammo, flow: game.flow,
         timeScale: game.timeScale, revivesUsed: game.revivesUsed,
         destroyed: game.destroyed.size, collected: game.collected.size,
+        hasEcho: !!game.echoPlayer, echoPos: game.echoPos, beatEcho: game.beatEcho,
       };
     },
   };

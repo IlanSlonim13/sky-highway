@@ -1,7 +1,7 @@
 {
   "name": "sky-highway",
   "version": "1.0.0",
-  "description": "SkyRoads-style retro arcade runner for Android & iOS — neon highways, slow motion, 3-second-rewind extra lives, 100 levels.",
+  "description": "SkyRoads-style retro arcade runner for Android & iOS \u2014 neon highways, slow motion, 3-second-rewind extra lives, 100 levels.",
   "private": true,
   "type": "module",
   "scripts": {
@@ -9,15 +9,19 @@
     "validate": "node tools/validate-levels.mjs",
     "sync": "npx cap sync",
     "android": "npx cap open android",
-    "ios": "npx cap open ios"
+    "ios": "npx cap open ios",
+    "build:single": "node tools/build-single.mjs",
+    "test": "node tools/validate-levels.mjs && node tools/test-daily-echo.mjs"
   },
   "devDependencies": {
-    "@capacitor/cli": "^6.0.0"
+    "@capacitor/cli": "^6.0.0",
+    "rollup": "^4.62.2"
   },
   "dependencies": {
+    "@capacitor-community/admob": "^6.0.0",
     "@capacitor/android": "^6.0.0",
     "@capacitor/core": "^6.0.0",
     "@capacitor/ios": "^6.0.0",
-    "@capacitor-community/admob": "^6.0.0"
+    "@capacitor/local-notifications": "^6.0.0"
   }
 }

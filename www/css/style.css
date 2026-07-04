@@ -280,6 +280,127 @@ h2.lose { color: var(--danger); text-shadow: 0 0 14px var(--danger); }
 .panel h2 { margin-bottom: 6px; }
 .panel .muted { margin-bottom: 16px; }
 
+/* ---------- v2: menu mode cards ---------- */
+.menu-top {
+  position: absolute; top: calc(14px + var(--safe-top));
+  left: calc(14px + var(--safe-left)); right: calc(14px + var(--safe-right));
+  display: flex; justify-content: space-between; align-items: center;
+}
+.mode-cards { display: flex; flex-direction: column; gap: 10px; width: min(360px, 86vw); }
+.mode-card {
+  display: flex; align-items: center; gap: 14px;
+  font: inherit; color: #fff; text-align: left;
+  background: linear-gradient(90deg, rgba(60, 25, 130, 0.55), rgba(25, 12, 60, 0.55));
+  border: 2px solid var(--glow);
+  border-radius: 16px;
+  padding: 14px 16px;
+  min-height: 64px;
+  cursor: pointer;
+  box-shadow: 0 0 14px rgba(200, 107, 255, 0.25);
+  transition: transform 0.08s;
+}
+.mode-card:active { transform: scale(0.97); }
+.mode-card.daily {
+  border-color: var(--gold);
+  background: linear-gradient(90deg, rgba(130, 95, 20, 0.45), rgba(60, 40, 10, 0.45));
+  box-shadow: 0 0 14px rgba(255, 210, 74, 0.3);
+}
+.mode-ico { font-size: 1.6rem; width: 36px; text-align: center; }
+.mode-info { flex: 1; display: flex; flex-direction: column; gap: 2px; }
+.mode-info b { letter-spacing: 0.12em; }
+.mode-info small { color: #b0a8cc; font-size: 0.7rem; }
+.mode-card.daily .mode-info small { color: #d8c48a; }
+.mode-go { color: var(--glow2); font-size: 1.2rem; }
+.mode-badge {
+  background: rgba(0, 0, 0, 0.35);
+  border-radius: 14px; padding: 4px 10px;
+  font-size: 0.9rem; font-weight: bold; color: var(--gold);
+}
+
+.mission-strip { display: flex; gap: 8px; margin-top: 14px; width: min(360px, 86vw); }
+.mission-chip {
+  flex: 1;
+  background: rgba(20, 12, 45, 0.8);
+  border: 1px solid rgba(84, 240, 255, 0.35);
+  border-radius: 12px;
+  padding: 8px 8px 6px;
+  font-size: 0.62rem; color: #b0a8cc;
+  text-align: center;
+}
+.mission-chip .mprog { display: block; margin-top: 4px; color: var(--glow2); font-weight: bold; }
+.mission-chip.mdone { border-color: var(--gold); color: var(--gold); }
+
+.menu-row { display: flex; gap: 10px; margin-top: 14px; }
+.piggy-chip {
+  position: absolute; bottom: calc(64px + var(--safe-bottom));
+  font-size: 0.8rem; color: #ff9bc8;
+  background: rgba(40, 15, 35, 0.8);
+  border: 1px solid rgba(255, 155, 200, 0.4);
+  border-radius: 16px; padding: 5px 12px;
+}
+
+/* ---------- v2: daily ---------- */
+h2.gold { color: var(--gold); text-shadow: 0 0 14px var(--gold); }
+.daily-calendar { display: flex; gap: 6px; margin: 12px 0 4px; }
+.daily-cell {
+  width: 34px; height: 40px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  background: rgba(30, 22, 60, 0.8);
+  border: 1px solid #3a3358; border-radius: 8px;
+  font-size: 0.6rem; color: #8f84b3;
+}
+.daily-cell .medal { font-size: 0.9rem; }
+.daily-cell.today { border-color: var(--gold); }
+.daily-stats { color: #cfc6ec; font-size: 0.85rem; margin: 8px 0 10px; }
+.danger-note { color: var(--danger); font-size: 0.8rem; margin: 6px 0; }
+
+/* ---------- v2: HUD flow chip ---------- */
+.flow-chip {
+  min-width: 44px; padding: 4px 8px;
+  text-align: center; font-weight: bold; font-size: 0.9rem;
+  color: #8f84b3;
+  background: rgba(20, 12, 45, 0.7);
+  border: 1px solid #3a3358; border-radius: 12px;
+  transition: color 0.2s, border-color 0.2s;
+}
+.flow-chip.hot { color: var(--gold); border-color: var(--gold); text-shadow: 0 0 8px var(--gold); }
+
+/* ---------- v2: results ---------- */
+.btn-gold {
+  border-color: var(--gold);
+  background: linear-gradient(180deg, rgba(255, 210, 74, 0.25), rgba(130, 95, 20, 0.25));
+  box-shadow: 0 0 16px rgba(255, 210, 74, 0.4);
+}
+.echo-banner {
+  background: rgba(84, 240, 255, 0.12);
+  border: 1px solid var(--glow2);
+  color: var(--glow2);
+  border-radius: 12px;
+  padding: 8px 14px;
+  margin-bottom: 10px;
+  font-size: 0.85rem; letter-spacing: 0.1em;
+}
+.gold-banner { border-color: var(--gold); color: var(--gold); background: rgba(255, 210, 74, 0.12); }
+.mission-ticks { width: 100%; margin-bottom: 8px; }
+.mission-tick {
+  display: flex; justify-content: space-between; align-items: center;
+  font-size: 0.7rem; color: #b0a8cc;
+  padding: 5px 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+.mission-tick .claim {
+  font: inherit; font-weight: bold; color: #051020;
+  background: var(--gold); border: none; border-radius: 8px;
+  padding: 4px 10px; cursor: pointer; min-height: 30px;
+}
+.mission-tick.done-row { color: var(--gold); }
+
+/* ---------- v2: hangar ---------- */
+#screen-hangar { justify-content: flex-start; padding-top: calc(70px + var(--safe-top)); background: rgba(3, 0, 12, 0.72); }
+.swatch { width: 22px; height: 22px; border-radius: 50%; box-shadow: 0 0 10px currentColor; }
+.store-item.equipped { border-color: var(--glow2); box-shadow: 0 0 14px rgba(84, 240, 255, 0.3); }
+.store-item .buy.equipped-btn { border-color: #5a5478; color: #8f84b3; }
+
 /* ---------- simulated ads (web dev builds) ---------- */
 #sim-banner {
   position: fixed; left: 0; right: 0; bottom: 0;
@@ -327,6 +448,28 @@ h2.lose { color: var(--danger); text-shadow: 0 0 14px var(--danger); }
   margin-top: 10px; cursor: pointer;
 }
 .sim-ad-count { position: absolute; top: 16px; left: 16px; color: #8f84b3; font-weight: bold; }
+
+/* ---------- toasts ---------- */
+.toast {
+  position: fixed;
+  top: calc(70px + var(--safe-top));
+  left: 50%;
+  transform: translate(-50%, -20px);
+  background: rgba(15, 8, 40, 0.95);
+  border: 1px solid var(--gold);
+  border-radius: 14px;
+  color: var(--gold);
+  padding: 10px 18px;
+  font-size: 0.85rem;
+  letter-spacing: 0.05em;
+  z-index: 60;
+  opacity: 0;
+  transition: opacity 0.3s, transform 0.3s;
+  pointer-events: none;
+  box-shadow: 0 0 20px rgba(255, 210, 74, 0.25);
+}
+.toast.show { opacity: 1; transform: translate(-50%, 0); }
+.tick-actions { display: flex; gap: 6px; align-items: center; }
 
 @media (prefers-reduced-motion: reduce) {
   * { animation: none !important; transition: none !important; }

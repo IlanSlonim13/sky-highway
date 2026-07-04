@@ -13,15 +13,38 @@
 
   <!-- ============ MAIN MENU ============ -->
   <section id="screen-menu" class="screen visible">
-    <div class="coin-chip"><span class="coin-ico">◆</span><span id="menu-coins">0</span></div>
-    <h1 class="title">SKY<br>HIGHWAY</h1>
-    <p class="subtitle">a neon road above the stars</p>
-    <div class="menu-buttons">
-      <button id="btn-play" class="btn btn-primary">▶ &nbsp;PLAY</button>
-      <button id="btn-store" class="btn">🛒 &nbsp;STORE</button>
-      <button id="btn-sound" class="btn btn-small">🔊 SOUND ON</button>
+    <div class="menu-top">
+      <button id="btn-sound" class="hud-btn">🔊</button>
+      <div class="coin-chip"><span class="coin-ico">◆</span><span id="menu-coins">0</span></div>
     </div>
-    <p class="hint-line">drag to steer · tap to jump · fire to blast barriers</p>
+    <h1 class="title">SKY<br>HIGHWAY</h1>
+    <p class="subtitle">race the road · race your past</p>
+
+    <div class="mode-cards">
+      <button id="card-campaign" class="mode-card">
+        <span class="mode-ico">🗺️</span>
+        <span class="mode-info"><b>CAMPAIGN</b><small id="campaign-sub">100 levels</small></span>
+        <span class="mode-go">▶</span>
+      </button>
+      <button id="card-daily" class="mode-card daily">
+        <span class="mode-ico">📅</span>
+        <span class="mode-info"><b>TODAY'S RUN</b><small id="daily-sub">everyone flies the same track</small></span>
+        <span class="mode-badge" id="daily-streak">🔥0</span>
+      </button>
+      <button id="card-endless" class="mode-card">
+        <span class="mode-ico">∞</span>
+        <span class="mode-info"><b>HYPERDRIVE</b><small id="endless-sub">endless · ever faster</small></span>
+        <span class="mode-go">▶</span>
+      </button>
+    </div>
+
+    <div id="mission-strip" class="mission-strip"></div>
+
+    <div class="menu-row">
+      <button id="btn-hangar" class="btn btn-small">🛠 HANGAR</button>
+      <button id="btn-store" class="btn btn-small">🛒 STORE</button>
+    </div>
+    <div id="piggy-chip" class="piggy-chip" hidden>🐷 <span id="piggy-fill">0</span>/<span id="piggy-cap">500</span></div>
   </section>
 
   <!-- ============ LEVEL SELECT ============ -->
@@ -34,6 +57,21 @@
     <div id="level-grid" class="level-grid"></div>
   </section>
 
+  <!-- ============ HANGAR ============ -->
+  <section id="screen-hangar" class="screen">
+    <header class="bar">
+      <button class="btn btn-back" data-back>‹</button>
+      <h2>HANGAR</h2>
+      <div class="coin-chip"><span class="coin-ico">◆</span><span id="hangar-coins">0</span></div>
+    </header>
+    <div class="store-scroll">
+      <h3 class="store-section">SHIPS</h3>
+      <div id="hangar-ships"></div>
+      <h3 class="store-section">TRAILS</h3>
+      <div id="hangar-trails"></div>
+    </div>
+  </section>
+
   <!-- ============ STORE ============ -->
   <section id="screen-store" class="screen">
     <header class="bar">
@@ -42,6 +80,7 @@
       <div class="coin-chip"><span class="coin-ico">◆</span><span id="store-coins">0</span></div>
     </header>
     <div class="store-scroll">
+      <div id="store-piggy"></div>
       <h3 class="store-section">POWER-UPS <span>(coins)</span></h3>
       <div id="store-coin-items"></div>
       <h3 class="store-section">FREE COINS</h3>
@@ -52,11 +91,30 @@
     </div>
   </section>
 
+  <!-- ============ DAILY INTRO ============ -->
+  <section id="screen-daily" class="screen overlay">
+    <div class="panel">
+      <h2 class="gold">TODAY'S RUN</h2>
+      <p class="muted">one track · the whole world · every day</p>
+      <div id="daily-calendar" class="daily-calendar"></div>
+      <p class="daily-stats"><span id="daily-attempts">3</span> attempts left · streak <b id="daily-streak-big">🔥0</b></p>
+      <div id="daily-saver" hidden>
+        <p class="danger-note">Your <b id="saver-count">0</b>-day streak broke yesterday!</p>
+        <button id="btn-saver-ad" class="btn">🎬 RESTORE STREAK — watch ad</button>
+        <button id="btn-saver-coins" class="btn">◆ RESTORE — <span id="saver-price">200</span> coins</button>
+      </div>
+      <button id="btn-daily-play" class="btn btn-primary btn-big">▶ FLY</button>
+      <button id="btn-daily-ad-attempt" class="btn">🎬 +1 ATTEMPT — watch ad</button>
+      <button class="btn btn-ghost" data-back>BACK</button>
+    </div>
+  </section>
+
   <!-- ============ IN-GAME HUD ============ -->
   <section id="hud" class="screen transparent">
     <header class="hud-top">
       <button id="btn-pause" class="hud-btn">II</button>
       <div class="progress-wrap"><div id="progress-fill"></div><div id="progress-label">LEVEL 1</div></div>
+      <div id="flow-chip" class="flow-chip">×1</div>
       <div class="coin-chip small"><span class="coin-ico">◆</span><span id="hud-coins">0</span></div>
     </header>
     <div class="hud-bottom">
@@ -92,22 +150,28 @@
     </div>
   </section>
 
-  <!-- ============ LEVEL COMPLETE ============ -->
+  <!-- ============ LEVEL COMPLETE / RUN RESULTS ============ -->
   <section id="screen-complete" class="screen overlay">
     <div class="panel">
-      <h2 class="win">LEVEL COMPLETE!</h2>
+      <h2 class="win" id="complete-title">LEVEL COMPLETE!</h2>
+      <div id="echo-banner" class="echo-banner" hidden>👻 ECHO BEATEN <span class="pill">+25</span></div>
       <p id="complete-stats" class="muted"></p>
+      <div id="complete-missions" class="mission-ticks"></div>
+      <button id="btn-double" class="btn btn-gold">🎬 DOUBLE COINS<span class="btn-note">watch ad</span></button>
       <button id="btn-next" class="btn btn-primary">NEXT LEVEL ▶</button>
       <button id="btn-replay" class="btn">REPLAY</button>
       <button id="btn-complete-menu" class="btn btn-ghost">MENU</button>
     </div>
   </section>
 
-  <!-- ============ FAILED ============ -->
+  <!-- ============ FAILED / ENDLESS RESULTS ============ -->
   <section id="screen-failed" class="screen overlay">
     <div class="panel">
-      <h2 class="lose">SHIP LOST</h2>
+      <h2 class="lose" id="failed-title">SHIP LOST</h2>
+      <div id="newbest-banner" class="echo-banner gold-banner" hidden>🏆 NEW BEST!</div>
       <p id="failed-stats" class="muted"></p>
+      <div id="failed-missions" class="mission-ticks"></div>
+      <button id="btn-double-fail" class="btn btn-gold">🎬 DOUBLE COINS<span class="btn-note">watch ad</span></button>
       <button id="btn-retry" class="btn btn-primary">TRY AGAIN</button>
       <button id="btn-failed-menu" class="btn btn-ghost">MENU</button>
     </div>

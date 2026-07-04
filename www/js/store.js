@@ -1,9 +1,9 @@
 // Sky Highway — economy + in-app purchases.
 //
 // Two currencies:
-//   * coins  — earned by playing (pickups + level completion), spent on
-//              slow-mo charges, rewind charges and ammo.
-//   * money  — real IAP for coin packs and "remove ads".
+//   * coins  — earned by playing (pickups + level completion + streaks +
+//              missions), spent on charges, ammo, ships and trails.
+//   * money  — real IAP: coin packs, Starter Pack, Piggy Bank, Premium.
 //
 // The native IAP path is a single splice point (`purchaseIAP`): wire it to
 // RevenueCat or cordova-plugin-purchase for store builds (see README). On web
@@ -12,6 +12,7 @@
 import { ECONOMY } from './config.js';
 import { save } from './save.js';
 import { setAdsRemoved as adsSetRemoved, hideBanner } from './ads.js';
+import { grantShip, grantTrail } from './cosmetics.js';
 
 export const CATALOG = {
   coinItems: [
@@ -27,26 +28,46 @@ export const CATALOG = {
     },
     {
       id: 'ammo6', icon: '🔸', name: 'Ammo ×6',
-      desc: 'Start your next runs with 6 shots banked', price: 40,
-      grant: () => { pendingAmmo += 6; },
+      desc: 'Start your next run with 6 shots banked', price: 40,
+      grant: () => save.addPendingAmmo(6),
     },
   ],
   iapItems: [
+    {
+      id: 'premium', icon: '👑', name: 'PREMIUM', price: '$4.99', once: true,
+      desc: 'No ads · 5 daily attempts · Aurora ship · Gold trail · +10% coins',
+      grant: grantPremium,
+      owned: () => save.isPremium(),
+    },
+    {
+      id: 'starter', icon: '🚀', name: 'Starter Pack', price: '$0.99', once: true,
+      desc: '300 coins · 3 rewinds · 3 slow-mo · Bolt ship',
+      grant: grantStarter,
+      owned: () => save.get().starterOwned,
+    },
     { id: 'coins500', icon: '🪙', name: '500 Coins', desc: 'A pouch of coins', price: '$1.99', grant: () => save.addCoins(500) },
     { id: 'coins1500', icon: '💰', name: '1500 Coins', desc: 'A crate of coins', price: '$4.99', grant: () => save.addCoins(1500) },
-    { id: 'removeads', icon: '🚫', name: 'Remove Ads', desc: 'No more banners & interstitials, forever', price: '$2.99', grant: grantRemoveAds },
   ],
 };
 
-// Ammo bought in the store is banked and loaded into the next run.
-export let pendingAmmo = 0;
-export function takePendingAmmo() { const a = pendingAmmo; pendingAmmo = 0; return a; }
-
-function grantRemoveAds() {
+function grantPremium() {
   save.setAdsRemoved(true);
   adsSetRemoved(true);
   hideBanner();
+  grantShip('aurora');
+  grantTrail('gold');
 }
+
+function grantStarter() {
+  save.update((d) => { d.starterOwned = true; });
+  save.addCoins(300);
+  save.addCharges('rewind', 3);
+  save.addCharges('slowmo', 3);
+  grantShip('bolt');
+}
+
+// piggy bank: sold separately from the catalog rows (its card shows the fill level)
+export const PIGGY_IAP = { id: 'piggy', icon: '🐷', name: 'Crack the Piggy Bank', price: '$1.99' };
 
 export function buyWithCoins(id) {
   const item = CATALOG.coinItems.find((i) => i.id === id);
@@ -60,8 +81,11 @@ function isNative() {
 }
 
 export async function purchaseIAP(id) {
-  const item = CATALOG.iapItems.find((i) => i.id === id);
+  const item = id === 'piggy'
+    ? { ...PIGGY_IAP, grant: () => save.crackBank() }
+    : CATALOG.iapItems.find((i) => i.id === id);
   if (!item) return false;
+  if (item.owned && item.owned()) return false;
 
   if (isNative()) {
     // ── NATIVE IAP SPLICE POINT ─────────────────────────────────────────

@@ -9,17 +9,43 @@ Built as a fully self-contained HTML5 game (zero runtime dependencies) wrapped w
 
 ## Features
 
-- 🎮 **100 levels** — 10 handcrafted + 90 procedurally generated, every one *provably
-  completable* (a BFS solver validates each level, including with zero shots fired)
+**Three modes**
+- 🗺️ **Campaign** — 100 levels: 10 handcrafted + 90 procedurally generated, every one
+  *provably completable* (a BFS solver validates each level, including with zero shots fired)
+- 📅 **Today's Run** — a daily challenge where *the date is the seed*: everyone on Earth
+  flies the same track each day, no server needed. 3 attempts/day (5 for Premium, +1 per
+  rewarded ad), medals (🥉🥈🥇), and a **streak** with escalating rewards, 7-day chests and
+  a streak-saver (ad or coins) when you miss a single day
+- ∞ **Hyperdrive** — endless mode that streams track forever and keeps speeding up; the
+  track rotates daily, chase your best distance & score
+
+**The twist: 👻 Echo Ghosts — race your own past.** Every run is recorded (~3 KB/min,
+all local). Your best run replays as a translucent echo ship flying beside you — and right
+after a crash, your failed attempt's echo joins the next try. Beat your echo to the finish
+for bonus coins. Combined with the 3-second-rewind revive, time manipulation is the game's
+identity.
+
+**Core mechanics**
 - 🐌 **Slow motion** — purchasable charges that bend time for 6 seconds
 - ⏪ **Extra life with 3-second rewind** — crash, watch a rewarded ad (or spend a purchased
-  rewind charge), and the game rewinds 3 seconds so you can try the section again
-- 🔫 **Destructible barriers & ammo** — pick up energy cells and blast orange barriers for
-  bonus coins, or steer around them (never required to shoot)
-- 🪙 **Coin economy** — collect coins on the track, buy slow-mo / rewind / ammo packs
-- 📺 **Ads** — AdMob banner + interstitial + rewarded, with a "Remove Ads" IAP
+  rewind charge), and the game rewinds 3 seconds; echoes keep flying, coins/ammo/barriers
+  inside the rewound window are restored
+- 🔫 **Destructible barriers & ammo** — blast orange barriers for bonus coins, or steer
+  around them (never required)
+- ⚡ **Flow meter** — coins, near-misses, cleared gaps and barrier kills chain a ×1–×5
+  multiplier on everything you earn; crash and it's gone
+
+**Engagement & economy**
+- 🎯 **3 daily missions** (date-rotated) + **12 lifetime achievements** with coin/ship rewards
+- 🛠 **Hangar** — 8 ships and 6 trails: coins, achievements, Starter Pack and Premium unlocks
+- 🐷 **Piggy Bank** — 10% of all earnings pile up; crack it with an IAP or 3 rewarded ads
+- 🪙 Coin sinks: slow-mo, rewinds, ammo, ships, trails, streak savers
+- 📺 **Ads** — AdMob banner + interstitial + rewarded placements (extra life, double coins,
+  extra daily attempt, streak saver, double mission reward, piggy bank, free coins)
+- 👑 **Premium ($4.99)** — no banners/interstitials, 5 daily attempts, exclusive Aurora
+  ship + Gold trail, +10% coin earnings (rewarded ads stay available by choice)
 - 📱 **Mobile-first** — touch steering (drag) + tap to jump, HUD buttons, safe-area aware,
-  portrait & landscape, works offline
+  portrait & landscape, works offline (all progress in localStorage)
 
 ## Play in a browser (dev)
 
@@ -71,11 +97,13 @@ using `www/assets/icon.svg` as the source.
 
 The store UI and product catalog live in `www/js/store.js`. Products:
 
-| id         | type           | grants                    | suggested price |
-|------------|----------------|---------------------------|-----------------|
-| `coins500` | consumable     | 500 coins                 | $1.99           |
-| `coins1500`| consumable     | 1500 coins                | $4.99           |
-| `removeads`| non-consumable | disables banner + interstitials | $2.99     |
+| id         | type           | grants                                                | suggested price |
+|------------|----------------|-------------------------------------------------------|-----------------|
+| `premium`  | non-consumable | no ads · 5 daily attempts · Aurora ship · Gold trail · +10% coins | $4.99 |
+| `starter`  | non-consumable | 300 coins · 3 rewinds · 3 slow-mo · Bolt ship         | $0.99           |
+| `coins500` | consumable     | 500 coins                                             | $1.99           |
+| `coins1500`| consumable     | 1500 coins                                            | $4.99           |
+| `piggy`    | consumable     | cracks the piggy bank (up to 500 banked coins)        | $1.99           |
 
 On web/dev builds purchases are **simulated** behind a confirm dialog. For store builds,
 wire real billing at the single splice point marked `NATIVE IAP SPLICE POINT` in
@@ -105,16 +133,34 @@ change with:
 npm run validate     # BFS-solves all 100 levels; must print 100/100
 ```
 
+## Streak reminders (local notifications)
+
+`www/js/main.js` schedules a daily 19:00 "keep your streak alive" reminder through
+`@capacitor/local-notifications` (permission is requested only after the player completes
+their first daily — never on first launch). Install it for native builds:
+
+```bash
+npm install @capacitor/local-notifications && npx cap sync
+```
+
+On web the call is a silent no-op. An in-app review prompt hook fires once after the 3rd
+level win when a rate-app plugin is present (`RateApp.requestReview`).
+
 ## Project layout
 
 ```
 www/            game (Capacitor webDir)
   js/config.js    all tuning constants
-  js/levels.js    themes, 10 handcrafted levels, generator, solver
-  js/game.js      simulation: physics, rewind ring buffer, slow-mo, shooting
-  js/renderer.js  pseudo-3D canvas renderer
-  js/main.js      screens, HUD, revive flow, wiring
+  js/levels.js    TrackBuilder, campaign/daily/endless generators, solver
+  js/game.js      simulation: physics, rewind buffer, slow-mo, shooting, flow, echo feed
+  js/daily.js     daily challenge: attempts, streaks, medals, missions (node-testable)
+  js/echo.js      echo ghost recording/replay + packed storage (node-testable)
+  js/cosmetics.js ships & trails
+  js/renderer.js  pseudo-3D canvas renderer (echo ships, trails, flow glow)
+  js/main.js      screens, HUD, revive/daily/results flows, achievements, wiring
   js/ads.js       AdMob abstraction + web-simulated ads
-  js/store.js     coin economy + IAP splice point
-tools/          validate-levels.mjs
+  js/store.js     coin economy, premium/starter/piggy, IAP splice point
+tools/          validate-levels.mjs (solver + pinned campaign hash + daily seeds)
+                test-daily-echo.mjs (unit tests)
+                build-single.mjs (bundle the game into one HTML file)
 ```
