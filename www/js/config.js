@@ -77,6 +77,44 @@ export const WEAPON = {
 
 export const MAX_REVIVES_PER_RUN = 2;
 
+export const ENDLESS = {
+  baseSpeed: 7,           // tiles/s at the start line
+  maxSpeed: 13,           // tiles/s ceiling
+  rampDistance: 1500,     // rows to reach max difficulty/speed
+};
+
+export const FLOW = {
+  maxTier: 5,             // coin/score multiplier x1..x5
+  eventsPerTier: 4,       // style events needed per tier
+  decaySeconds: 4,        // no event for this long -> lose a tier
+  nearMissDist: 0.45,     // lanes: pass this close to a tall block/barrier = style
+};
+
+export const ECHO = {
+  hz: 15,                 // recording sample rate
+  maxStored: 12,          // LRU cap for persisted campaign echoes
+  beatBonus: 25,          // coins for finishing ahead of your echo
+};
+
+export const DAILY = {
+  attempts: 3,            // base attempts per day
+  premiumAttempts: 5,     // for premium owners
+  adAttempts: 3,          // max extra attempts from rewarded ads per day
+  streakSaverCoins: 200,  // coin price to restore a broken streak
+  maxRestoresPerWeek: 2,
+  chestEvery: 7,          // every Nth streak day pays the chest
+  chestCoins: 300,
+  streakBase: 20,         // day-1 completion reward ...
+  streakStep: 10,         // ... +this per additional day ...
+  streakCap: 100,         // ... capped here
+};
+
+export const PIGGY = {
+  rate: 0.10,             // share of earned coins that also fills the bank
+  cap: 500,
+  adsToOpen: 3,           // rewarded ads to crack a FULL bank without paying
+};
+
 export const BLOCK_HEIGHTS = { low: 0.55, tall: 1.15 };
 
 // Cell type characters used by the level format.

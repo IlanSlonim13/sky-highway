@@ -9,7 +9,7 @@
 // playable path first and decorates around it; every level additionally
 // passes the reachability solver in `validateLevel` (see tools/validate-levels.mjs).
 
-import { CELL, TRACK_LANES, PHYSICS } from './config.js';
+import { CELL, TRACK_LANES, PHYSICS, LANE_MIN, LANE_MAX, ENDLESS } from './config.js';
 
 export const LEVEL_COUNT = 100;
 
@@ -401,7 +401,7 @@ const HANDCRAFTED = [level1, level2, level3, level4, level5, level6, level7, lev
 // ---------------------------------------------------------------------------
 // Seeded RNG (mulberry32) — deterministic generation per level index.
 // ---------------------------------------------------------------------------
-function mulberry32(seed) {
+export function mulberry32(seed) {
   let a = seed >>> 0;
   return function () {
     a |= 0; a = (a + 0x6D2B79F5) | 0;
@@ -427,226 +427,312 @@ export function maxJumpGap(speed) {
 }
 
 // ---------------------------------------------------------------------------
-// Generator for levels 11-100.
+// TrackBuilder — the pattern-emitter machinery shared by the campaign
+// generator (levels 11-100), the daily challenge and the endless mode.
 //
 // Strategy: walk a "path lane" down the track. For each chunk pick a pattern
 // and emit rows such that the path lane is always survivable with simple
 // moves (steer <=1 lane per 2 rows on the ground; gaps <= maxJumpGap; low
 // blocks always have >=2 rows of runway and >=2 rows of landing).
 // Decoration (side floor, towers, hazards, coins) never touches the path.
+//
+// IMPORTANT: campaign output must stay byte-identical across refactors —
+// tools/validate-levels.mjs pins a SHA256 of all 100 levels. Any change to
+// rng() call order here changes every generated level.
 // ---------------------------------------------------------------------------
-function generateLevel(index) {
-  const rng = mulberry32(0xA11CE + index * 7919);
-  const speed = levelSpeed(index);
-  const jump = maxJumpGap(speed);
-  const difficulty = Math.min(1, (index - 9) / 90); // 0 at lvl 10, 1 at lvl 100
-  const targetRows = Math.round(200 + 260 * difficulty); // 200 -> 460 rows
+class TrackBuilder {
+  constructor(rng, difficulty, jump) {
+    this.rng = rng;
+    this.jump = jump;
+    this.rows = [];
+    this.path = 0; // current guaranteed-safe lane
+    this.setDifficulty(difficulty);
+  }
 
-  const rows = [];
-  let path = 0; // current guaranteed-safe lane
-  const LANE_MIN_ = -3, LANE_MAX_ = 3;
+  setDifficulty(d) {
+    this.difficulty = d;
+    // Probability that a non-path cell has floor at all (thins out with difficulty)
+    this.sideFloorP = 0.9 - 0.35 * d;
+  }
 
-  const pushRow = (cells) => rows.push(cells);
+  open(n) { for (let i = 0; i < n; i++) this.rows.push(fullRow()); }
+  close(n) { this.open(n); }
 
-  // Probability that a non-path cell has floor at all (thins out with difficulty)
-  const sideFloorP = 0.9 - 0.35 * difficulty;
-
-  function decoratedRow(safeLanes, opts = {}) {
+  decoratedRow(safeLanes, opts = {}) {
     // safeLanes: Set of lanes that must be plain floor (or given char)
     const r = emptyRow();
-    for (let lane = LANE_MIN_; lane <= LANE_MAX_; lane++) {
+    for (let lane = LANE_MIN; lane <= LANE_MAX; lane++) {
       const i = lane + L;
       if (safeLanes.has(lane)) { r[i] = opts.pathChar || CELL.FLOOR; continue; }
-      if (rng() < sideFloorP) {
-        const roll = rng();
-        if (roll < 0.06 * difficulty + 0.02) r[i] = CELL.TALL;
-        else if (roll < 0.12 * difficulty + 0.05) r[i] = CELL.LOW;
-        else if (roll < 0.16 * difficulty + 0.06) r[i] = CELL.HAZARD;
+      if (this.rng() < this.sideFloorP) {
+        const roll = this.rng();
+        if (roll < 0.06 * this.difficulty + 0.02) r[i] = CELL.TALL;
+        else if (roll < 0.12 * this.difficulty + 0.05) r[i] = CELL.LOW;
+        else if (roll < 0.16 * this.difficulty + 0.06) r[i] = CELL.HAZARD;
         else r[i] = CELL.FLOOR;
       }
     }
     return r;
   }
 
-  function safeSet(center, width) {
+  safeSet(center, width) {
     const s = new Set();
     const half = Math.floor(width / 2);
     let from = center - half, to = center + (width - 1 - half);
-    if (from < LANE_MIN_) { to += LANE_MIN_ - from; from = LANE_MIN_; }
-    if (to > LANE_MAX_) { from -= to - LANE_MAX_; to = LANE_MAX_; }
+    if (from < LANE_MIN) { to += LANE_MIN - from; from = LANE_MIN; }
+    if (to > LANE_MAX) { from -= to - LANE_MAX; to = LANE_MAX; }
     for (let l = from; l <= to; l++) s.add(l);
     return s;
   }
 
   // --- pattern emitters ------------------------------------------------
-  function patStraight(n) {
+  patStraight(n) {
     for (let i = 0; i < n; i++) {
-      const r = decoratedRow(safeSet(path, 3));
-      if (i === 1 && rng() < 0.22) r[path + L] = CELL.AMMO;
-      pushRow(r);
+      const r = this.decoratedRow(this.safeSet(this.path, 3));
+      if (i === 1 && this.rng() < 0.22) r[this.path + L] = CELL.AMMO;
+      this.rows.push(r);
     }
   }
 
-  function patMeander(n) {
+  patMeander(n) {
     let placed = 0;
     while (placed < n) {
-      const dir = path <= LANE_MIN_ + 1 ? 1 : path >= LANE_MAX_ - 1 ? -1 : (rng() < 0.5 ? -1 : 1);
+      const dir = this.path <= LANE_MIN + 1 ? 1 : this.path >= LANE_MAX - 1 ? -1 : (this.rng() < 0.5 ? -1 : 1);
       // 2 rows at current lane, then shift (<=1 lane per 2 rows keeps it easy)
-      pushRow(decoratedRow(safeSet(path, 3)));
-      pushRow(decoratedRow(safeSet(path, 3)));
-      path = Math.max(LANE_MIN_, Math.min(LANE_MAX_, path + dir));
+      this.rows.push(this.decoratedRow(this.safeSet(this.path, 3)));
+      this.rows.push(this.decoratedRow(this.safeSet(this.path, 3)));
+      this.path = Math.max(LANE_MIN, Math.min(LANE_MAX, this.path + dir));
       placed += 2;
     }
   }
 
-  function patGap() {
-    const g = 2 + Math.floor(rng() * Math.max(1, jump - 1)); // 2..jump
-    const gap = Math.min(g, jump);
+  patGap() {
+    const g = 2 + Math.floor(this.rng() * Math.max(1, this.jump - 1)); // 2..jump
+    const gap = Math.min(g, this.jump);
     // runway
-    for (let i = 0; i < 3; i++) pushRow(decoratedRow(safeSet(path, 3)));
+    for (let i = 0; i < 3; i++) this.rows.push(this.decoratedRow(this.safeSet(this.path, 3)));
     // the gap: nothing anywhere (occasional floating coin arc over it)
-    const coinArc = rng() < 0.5;
+    const coinArc = this.rng() < 0.5;
     for (let i = 0; i < gap; i++) {
       const r = emptyRow();
-      if (coinArc) r[path + L] = CELL.COIN_AIR;
-      pushRow(r);
+      if (coinArc) r[this.path + L] = CELL.COIN_AIR;
+      this.rows.push(r);
     }
     // landing
-    for (let i = 0; i < 3; i++) pushRow(decoratedRow(safeSet(path, 3)));
+    for (let i = 0; i < 3; i++) this.rows.push(this.decoratedRow(this.safeSet(this.path, 3)));
   }
 
-  function patNarrowBridge() {
-    const len = 4 + Math.floor(rng() * (5 + 6 * difficulty));
-    const width = rng() < 0.3 + 0.4 * difficulty ? 1 : 2;
+  patNarrowBridge() {
+    const len = 4 + Math.floor(this.rng() * (5 + 6 * this.difficulty));
+    const width = this.rng() < 0.3 + 0.4 * this.difficulty ? 1 : 2;
     for (let i = 0; i < len; i++) {
-      const s = safeSet(path, width);
+      const s = this.safeSet(this.path, width);
       const r = emptyRow();
       for (const l of s) r[l + L] = CELL.FLOOR;
-      if (i === Math.floor(len / 2)) r[path + L] = CELL.COIN;
-      pushRow(r);
+      if (i === Math.floor(len / 2)) r[this.path + L] = CELL.COIN;
+      this.rows.push(r);
     }
-    for (let i = 0; i < 2; i++) pushRow(decoratedRow(safeSet(path, 3)));
+    for (let i = 0; i < 2; i++) this.rows.push(this.decoratedRow(this.safeSet(this.path, 3)));
   }
 
-  function patLowBlockJump() {
+  patLowBlockJump() {
     // runway, 1 row of low blocks across the safe zone, landing
-    for (let i = 0; i < 3; i++) pushRow(decoratedRow(safeSet(path, 3)));
-    const r = decoratedRow(safeSet(path, 3), { pathChar: CELL.LOW });
-    pushRow(r);
-    for (let i = 0; i < 3; i++) pushRow(decoratedRow(safeSet(path, 3)));
+    for (let i = 0; i < 3; i++) this.rows.push(this.decoratedRow(this.safeSet(this.path, 3)));
+    const r = this.decoratedRow(this.safeSet(this.path, 3), { pathChar: CELL.LOW });
+    this.rows.push(r);
+    for (let i = 0; i < 3; i++) this.rows.push(this.decoratedRow(this.safeSet(this.path, 3)));
   }
 
-  function patSlalom() {
+  patSlalom() {
     // tall blocks alternate on either side of the path; path stays clear
-    const n = 3 + Math.floor(rng() * 3);
+    const n = 3 + Math.floor(this.rng() * 3);
     for (let k = 0; k < n; k++) {
       const side = k % 2 === 0 ? 1 : -1;
-      const blockLane = Math.max(LANE_MIN_, Math.min(LANE_MAX_, path + side));
+      const blockLane = Math.max(LANE_MIN, Math.min(LANE_MAX, this.path + side));
       for (let i = 0; i < 2; i++) {
-        const r = decoratedRow(safeSet(path, 3));
-        if (blockLane !== path) r[blockLane + L] = CELL.TALL;
-        pushRow(r);
+        const r = this.decoratedRow(this.safeSet(this.path, 3));
+        if (blockLane !== this.path) r[blockLane + L] = CELL.TALL;
+        this.rows.push(r);
       }
-      pushRow(decoratedRow(safeSet(path, 3)));
+      this.rows.push(this.decoratedRow(this.safeSet(this.path, 3)));
     }
   }
 
-  function patHazardCorridor() {
-    const len = 3 + Math.floor(rng() * (3 + 4 * difficulty));
+  patHazardCorridor() {
+    const len = 3 + Math.floor(this.rng() * (3 + 4 * this.difficulty));
     for (let i = 0; i < len; i++) {
       const r = fullRow(CELL.HAZARD);
-      for (const l of safeSet(path, 2)) r[l + L] = CELL.FLOOR;
-      pushRow(r);
+      for (const l of this.safeSet(this.path, 2)) r[l + L] = CELL.FLOOR;
+      this.rows.push(r);
     }
-    for (let i = 0; i < 2; i++) pushRow(decoratedRow(safeSet(path, 3)));
+    for (let i = 0; i < 2; i++) this.rows.push(this.decoratedRow(this.safeSet(this.path, 3)));
   }
 
-  function patBoost() {
-    const r = decoratedRow(safeSet(path, 3));
-    r[path + L] = CELL.BOOST;
-    pushRow(r);
+  patBoost() {
+    const r = this.decoratedRow(this.safeSet(this.path, 3));
+    r[this.path + L] = CELL.BOOST;
+    this.rows.push(r);
     // boosted: generous straight after
-    for (let i = 0; i < 8; i++) pushRow(decoratedRow(safeSet(path, 3)));
+    for (let i = 0; i < 8; i++) this.rows.push(this.decoratedRow(this.safeSet(this.path, 3)));
   }
 
-  function patBouncePad() {
+  patBouncePad() {
     // pad, big gap (cleared by pad's high jump), landing
-    const r = decoratedRow(safeSet(path, 3));
-    r[path + L] = CELL.PAD;
-    pushRow(r);
-    const gap = Math.min(jump + 2, 4 + Math.floor(rng() * 3));
+    const r = this.decoratedRow(this.safeSet(this.path, 3));
+    r[this.path + L] = CELL.PAD;
+    this.rows.push(r);
+    const gap = Math.min(this.jump + 2, 4 + Math.floor(this.rng() * 3));
     for (let i = 0; i < gap; i++) {
       const g = emptyRow();
-      if (i % 2 === 0) g[path + L] = CELL.COIN_AIR;
-      pushRow(g);
+      if (i % 2 === 0) g[this.path + L] = CELL.COIN_AIR;
+      this.rows.push(g);
     }
-    for (let i = 0; i < 4; i++) pushRow(decoratedRow(safeSet(path, 3)));
+    for (let i = 0; i < 4; i++) this.rows.push(this.decoratedRow(this.safeSet(this.path, 3)));
   }
 
-  function patDestructibleWall() {
+  patDestructibleWall() {
     // ammo on the path, then a barrier wall with a 2-lane open corridor at
     // one edge; the guaranteed path meanders into the corridor first, so the
     // wall is always avoidable without firing a shot.
-    const r0 = decoratedRow(safeSet(path, 3));
-    r0[path + L] = CELL.AMMO;
-    pushRow(r0);
-    const side = rng() < 0.5 ? -1 : 1;
-    const target = side < 0 ? LANE_MIN_ + 1 : LANE_MAX_ - 1; // inner corridor lane
-    while (path !== target) {
-      pushRow(decoratedRow(safeSet(path, 3)));
-      pushRow(decoratedRow(safeSet(path, 3)));
-      path += Math.sign(target - path);
+    const r0 = this.decoratedRow(this.safeSet(this.path, 3));
+    r0[this.path + L] = CELL.AMMO;
+    this.rows.push(r0);
+    const side = this.rng() < 0.5 ? -1 : 1;
+    const target = side < 0 ? LANE_MIN + 1 : LANE_MAX - 1; // inner corridor lane
+    while (this.path !== target) {
+      this.rows.push(this.decoratedRow(this.safeSet(this.path, 3)));
+      this.rows.push(this.decoratedRow(this.safeSet(this.path, 3)));
+      this.path += Math.sign(target - this.path);
     }
-    for (let i = 0; i < 2; i++) pushRow(decoratedRow(safeSet(path, 3)));
+    for (let i = 0; i < 2; i++) this.rows.push(this.decoratedRow(this.safeSet(this.path, 3)));
     // the wall: destructible everywhere except the 2-lane edge corridor
     const wall = fullRow(CELL.DESTRUCTIBLE);
-    const open1 = side < 0 ? LANE_MIN_ : LANE_MAX_;
+    const open1 = side < 0 ? LANE_MIN : LANE_MAX;
     const open2 = target;
     wall[open1 + L] = CELL.FLOOR;
     wall[open2 + L] = CELL.FLOOR;
-    pushRow(wall);
-    for (let i = 0; i < 3; i++) pushRow(decoratedRow(safeSet(path, 3)));
+    this.rows.push(wall);
+    for (let i = 0; i < 3; i++) this.rows.push(this.decoratedRow(this.safeSet(this.path, 3)));
   }
 
-  function patCoinRun() {
+  patCoinRun() {
     for (let i = 0; i < 5; i++) {
-      const r = decoratedRow(safeSet(path, 3));
-      r[path + L] = CELL.COIN;
-      pushRow(r);
+      const r = this.decoratedRow(this.safeSet(this.path, 3));
+      r[this.path + L] = CELL.COIN;
+      this.rows.push(r);
     }
   }
 
-  // weighted pattern table; harder patterns gain weight with difficulty
-  const patterns = [
-    [patStraight.bind(null, 6), 1.0],
-    [patMeander.bind(null, 8), 1.2],
-    [patGap, 1.0 + difficulty],
-    [patNarrowBridge, 0.6 + difficulty],
-    [patLowBlockJump, 0.8 + difficulty * 0.7],
-    [patSlalom, 0.7 + difficulty * 0.8],
-    [patHazardCorridor, 0.4 + difficulty],
-    [patBoost, 0.5],
-    [patBouncePad, 0.5 + difficulty * 0.4],
-    [patDestructibleWall, 0.5 + difficulty * 0.6],
-    [patCoinRun, 0.7],
-  ];
-  const totalW = patterns.reduce((s, [, w]) => s + w, 0);
+  // weighted pattern table; harder patterns gain weight with difficulty.
+  // ORDER AND WEIGHTS ARE PART OF THE CAMPAIGN'S PINNED OUTPUT — do not reorder.
+  patternTable() {
+    return [
+      [() => this.patStraight(6), 1.0],
+      [() => this.patMeander(8), 1.2],
+      [() => this.patGap(), 1.0 + this.difficulty],
+      [() => this.patNarrowBridge(), 0.6 + this.difficulty],
+      [() => this.patLowBlockJump(), 0.8 + this.difficulty * 0.7],
+      [() => this.patSlalom(), 0.7 + this.difficulty * 0.8],
+      [() => this.patHazardCorridor(), 0.4 + this.difficulty],
+      [() => this.patBoost(), 0.5],
+      [() => this.patBouncePad(), 0.5 + this.difficulty * 0.4],
+      [() => this.patDestructibleWall(), 0.5 + this.difficulty * 0.6],
+      [() => this.patCoinRun(), 0.7],
+    ];
+  }
 
-  // opening: full floor
-  for (let i = 0; i < 8; i++) pushRow(fullRow());
-
-  while (rows.length < targetRows) {
-    let roll = rng() * totalW;
+  emitOne() {
+    const patterns = this.patternTable();
+    const totalW = patterns.reduce((s, [, w]) => s + w, 0);
+    let roll = this.rng() * totalW;
     for (const [fn, w] of patterns) {
       roll -= w;
       if (roll <= 0) { fn(); break; }
     }
   }
 
-  // closing: full floor
-  for (let i = 0; i < 6; i++) pushRow(fullRow());
+  takeRows() { return this.rows.map((r) => r.join('')); }
+}
 
-  return rows.map((r) => (Array.isArray(r) ? r.join('') : r));
+// ---------------------------------------------------------------------------
+// Campaign generator for levels 11-100 (pinned output — see TrackBuilder note).
+// ---------------------------------------------------------------------------
+function generateLevel(index) {
+  const rng = mulberry32(0xA11CE + index * 7919);
+  const speed = levelSpeed(index);
+  const difficulty = Math.min(1, (index - 9) / 90); // 0 at lvl 10, 1 at lvl 100
+  const targetRows = Math.round(200 + 260 * difficulty); // 200 -> 460 rows
+
+  const tb = new TrackBuilder(rng, difficulty, maxJumpGap(speed));
+  tb.open(8);
+  while (tb.rows.length < targetRows) tb.emitOne();
+  tb.close(6);
+  return tb.takeRows();
+}
+
+// ---------------------------------------------------------------------------
+// Daily challenge — the date IS the seed, so everyone on Earth gets the same
+// track each day with no server. dayKey: 'YYYY-MM-DD' (local date).
+// ---------------------------------------------------------------------------
+export function getDailyLevel(dayKey) {
+  const n = Number(dayKey.replace(/-/g, ''));
+  const rng = mulberry32((0xDA117E ^ Math.imul(n, 2654435761)) >>> 0);
+  const difficulty = 0.35 + rng() * 0.3;
+  const speed = 8 + difficulty * 3;
+  const tb = new TrackBuilder(rng, difficulty, maxJumpGap(speed));
+  tb.open(8);
+  const targetRows = 300 + Math.floor(rng() * 80);
+  while (tb.rows.length < targetRows) tb.emitOne();
+  tb.close(6);
+  const rows = tb.takeRows();
+  return {
+    index: `daily-${dayKey}`,
+    daily: true,
+    dayKey,
+    name: "TODAY'S RUN",
+    speed,
+    theme: { ...THEMES[n % THEMES.length], glow: '#ffd24a', star: '#ffe9a0' },
+    rows,
+    length: rows.length,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Endless mode ("Hyperdrive") — the track streams forever. ensureRows(upTo)
+// appends chunks lazily; difficulty and speed ramp with distance.
+// ---------------------------------------------------------------------------
+export function createEndlessTrack(seed) {
+  const rng = mulberry32((0xE7D1E5 ^ Math.floor(seed)) >>> 0);
+  const tb = new TrackBuilder(rng, 0, maxJumpGap(ENDLESS.baseSpeed));
+  tb.open(8);
+  const rows = [];
+  const flush = () => {
+    while (rows.length < tb.rows.length) rows.push(tb.rows[rows.length].join(''));
+  };
+  flush();
+  const track = {
+    index: 'endless',
+    endless: true,
+    seed,
+    name: 'HYPERDRIVE',
+    theme: THEMES[Math.abs(Math.floor(seed)) % THEMES.length],
+    rows,
+    length: Infinity,
+    speed: ENDLESS.baseSpeed, // fallback; the game uses speedAt(z)
+    speedAt(z) {
+      return Math.min(ENDLESS.maxSpeed,
+        ENDLESS.baseSpeed + (z / ENDLESS.rampDistance) * (ENDLESS.maxSpeed - ENDLESS.baseSpeed));
+    },
+    ensureRows(upTo) {
+      while (rows.length < upTo) {
+        tb.setDifficulty(Math.min(1, rows.length / ENDLESS.rampDistance));
+        tb.jump = maxJumpGap(track.speedAt(rows.length));
+        tb.emitOne();
+        flush();
+      }
+    },
+  };
+  return track;
 }
 
 // ---------------------------------------------------------------------------

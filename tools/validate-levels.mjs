@@ -6,8 +6,13 @@
 //
 // Usage: node tools/validate-levels.mjs [--verbose]
 
-import { getLevel, validateLevel, LEVEL_COUNT, maxJumpGap } from '../www/js/levels.js';
+import { getLevel, validateLevel, LEVEL_COUNT, maxJumpGap, getDailyLevel } from '../www/js/levels.js';
 import { CELL, TRACK_LANES } from '../www/js/config.js';
+import { createHash } from 'crypto';
+
+// Pinned campaign output: refactors of the generator must not change any of
+// the 100 shipped levels (players' progress refers to these exact layouts).
+const CAMPAIGN_SHA256 = '31fb4be476fe2c7ce13d23d63c62b5e83cce7accc4a5f96417bdde269fb84786';
 
 const LEGAL = new Set(Object.values(CELL));
 const verbose = process.argv.includes('--verbose');
@@ -51,4 +56,28 @@ for (let i = 0; i < LEVEL_COUNT; i++) {
 }
 
 console.log(`\n${LEVEL_COUNT - failures}/${LEVEL_COUNT} levels valid — ${stats.rows} total rows, ${stats.coins} coins, ${stats.ammo} ammo cells, ${stats.destructibles} destructible barriers`);
+
+// --- pinned campaign hash ---
+const h = createHash('sha256');
+for (let i = 0; i < LEVEL_COUNT; i++) h.update(getLevel(i).rows.join('|'));
+const hash = h.digest('hex');
+if (hash !== CAMPAIGN_SHA256) {
+  failures++;
+  console.log(`FAIL  campaign hash drifted!\n  expected ${CAMPAIGN_SHA256}\n  got      ${hash}`);
+} else {
+  console.log('campaign layouts hash-identical to pinned SHA ✓');
+}
+
+// --- daily challenge: 30 seeds must be deterministic and solvable ---
+let dailyFails = 0;
+for (let d = 1; d <= 30; d++) {
+  const key = `2026-07-${String(d).padStart(2, '0')}`;
+  const a = getDailyLevel(key);
+  const b = getDailyLevel(key);
+  if (a.rows.join('|') !== b.rows.join('|')) { dailyFails++; console.log(`FAIL  daily ${key} not deterministic`); continue; }
+  if (!validateLevel(a)) { dailyFails++; console.log(`FAIL  daily ${key} NOT SOLVABLE`); }
+}
+failures += dailyFails;
+console.log(dailyFails === 0 ? '30/30 daily seeds deterministic + solvable ✓' : `${30 - dailyFails}/30 daily seeds OK`);
+
 process.exit(failures ? 1 : 0);
