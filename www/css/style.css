@@ -577,6 +577,22 @@ h2.gold { color: var(--gold); text-shadow: 0 0 14px var(--gold); }
 .toast.show { opacity: 1; transform: translate(-50%, 0); }
 .tick-actions { display: flex; gap: 6px; align-items: center; }
 
+/* ---------- v5: bigger touch targets in portrait ---------- */
+@media (orientation: portrait) {
+  .btn { min-height: 62px; font-size: 1.15rem; }
+  .btn-big { min-height: 76px; font-size: 1.3rem; }
+  .btn-small { min-height: 52px; font-size: 0.95rem; }
+  .hud-btn { width: 56px; height: 56px; font-size: 1.15rem; }
+  .hud-action { width: 96px; height: 96px; font-size: 2.1rem; }
+  .hud-action.jump { width: 122px; height: 122px; font-size: 2.6rem; }
+  .hud-action .badge { min-width: 28px; height: 28px; font-size: 0.85rem; }
+  .mode-card { min-height: 76px; padding: 16px 18px; }
+  .level-cell { font-size: 1.25rem; }
+  .sector-tab { min-height: 48px; font-size: 0.8rem; }
+  .store-item .buy { min-height: 52px; min-width: 96px; font-size: 1rem; }
+  .mission-tick .claim { min-height: 40px; padding: 6px 14px; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   * { animation: none !important; transition: none !important; }
 }

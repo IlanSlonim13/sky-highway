@@ -90,8 +90,10 @@ function showBase(id) {
     startAttract();
     if (ads.adsAvailable()) ads.showBanner();
     if (id === 'screen-menu') refreshMenu();
+    if (save.get().sound) audio.setMusic(true, 'menu');
   } else {
     ads.hideBanner();
+    if (save.get().sound) audio.setMusic(true, 'level');
   }
   refreshWallets();
 }
@@ -453,6 +455,7 @@ const CRASH_LINES = {
   burn: 'BURNED ON A HAZARD TILE',
   fall: 'LOST IN THE VOID',
   debris: 'CLIPPED THE SPACE DEBRIS',
+  comet: 'OBLITERATED BY A COMET',
 };
 
 function openReviveModal() {
@@ -1118,6 +1121,7 @@ if (location.search.includes('debug')) {
     playLevel: playCampaign,
     playDaily, playEndless, openDailyModal, refreshMenu,
     openWheel, spinWheel, buildStarStrip, buildStore, rankProgress,
+    spawnComet: (lane) => game._spawnComet(lane),
     win() { game.ship.z = game.level.length - 0.5; },
     crash() { game._crash('wall'); },
     state() {
