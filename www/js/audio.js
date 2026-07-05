@@ -146,7 +146,7 @@ const DRUM_KITS = {
 
 // --- "Hyperlane Odyssey" sections (A minor) --------------------------------
 const INTRO = {
-  chords: ['Am', 'Am', 'F', 'G'], bass: 'sparse', drums: 'quiet',
+  chords: ['Am', 'Am', 'F', 'G'], bass: 'sparse', drums: 'quiet', arp: 'half',
   lead: [
     [0, 0, 0, 0, 69, 0, 72, 0],
     [76, 0, 72, 0, 69, 0, 72, 0],
@@ -168,7 +168,7 @@ const VERSE1 = {
   ],
 };
 const VERSE2 = {
-  chords: ['Am', 'F', 'C', 'G', 'Am', 'F', 'C', 'E'], bass: 'pump', drums: 'verse',
+  chords: ['Am', 'F', 'C', 'G', 'Am', 'F', 'C', 'E'], bass: 'pump', drums: 'verse', arp: 'roll',
   lead: [
     [81, 79, 76, 79, 81, 84, 81, 79],
     [77, 81, 84, 81, 77, 72, 77, 81],
@@ -181,7 +181,7 @@ const VERSE2 = {
   ],
 };
 const CHORUS = {
-  chords: ['C', 'G', 'Am', 'F', 'C', 'G', 'Am', 'E'], bass: 'drive', drums: 'chorus',
+  chords: ['C', 'G', 'Am', 'F', 'C', 'G', 'Am', 'E'], bass: 'drive', drums: 'chorus', arp: 'sparkle', harmony: true,
   lead: [
     [84, 0, 79, 0, 76, 79, 84, 0],
     [83, 0, 79, 0, 74, 79, 83, 0],
@@ -207,7 +207,7 @@ const BRIDGE = {
   ],
 };
 const BREAKDOWN = {
-  chords: ['Am', 'F', 'Am', 'E', 'Am', 'F', 'G', 'E'], bass: 'sparse', drums: 'quiet',
+  chords: ['Am', 'F', 'Am', 'E', 'Am', 'F', 'G', 'E'], bass: 'sparse', drums: 'quiet', arp: 'half',
   lead: [
     [69, 0, 0, 0, 64, 0, 0, 0],
     [65, 0, 0, 0, 69, 0, 0, 0],
@@ -222,7 +222,7 @@ const BREAKDOWN = {
 
 // expand a section list into flat per-bar bass/lead/arp/drum arrays
 function expandSections(sections) {
-  const bass = [], lead = [], arp = [], drums = [];
+  const bass = [], lead = [], arp = [], drums = [], meta = [];
   for (const sec of sections) {
     sec.chords.forEach((name, i) => {
       const c = CHORDS[name];
@@ -230,9 +230,14 @@ function expandSections(sections) {
       lead.push(sec.lead[i]);
       arp.push(c.arp);
       drums.push(DRUM_KITS[sec.drums]);
+      meta.push({
+        arp: sec.arp || 'updown',
+        harmony: !!sec.harmony,
+        fill: i === sec.chords.length - 1, // snare roll into the next section
+      });
     });
   }
-  return { bass, lead, arp, drums, bars: bass.length };
+  return { bass, lead, arp, drums, meta, bars: bass.length };
 }
 
 // exported for the node test harness (bar-shape assertions)
@@ -287,6 +292,15 @@ function chipNote(type, midi, t0, dur, peak) {
   const g = ctx.createGain();
   osc.type = type;
   osc.frequency.value = midiHz(midi);
+  if (dur > 0.2) {
+    // sustained note: gentle chip vibrato after a short delay
+    const lfo = ctx.createOscillator();
+    const depth = ctx.createGain();
+    lfo.frequency.value = 5.5;
+    depth.gain.value = midiHz(midi) * 0.009;
+    lfo.connect(depth); depth.connect(osc.frequency);
+    lfo.start(t0 + 0.09); lfo.stop(t0 + dur + 0.05);
+  }
   env(g, t0, 0.008, dur, peak);
   osc.connect(g); g.connect(musicGain);
   osc.start(t0); osc.stop(t0 + dur + 0.05);
@@ -308,6 +322,8 @@ function chipNoise(t0, dur, filterHz, peak) {
   src.start(t0); src.stop(t0 + dur + 0.02);
 }
 
+const DEFAULT_META = { arp: 'updown', harmony: false, fill: false };
+
 function scheduleMusic() {
   if (!ctx || !musicGain) return;
   const song = SONGS[songName];
@@ -316,6 +332,7 @@ function scheduleMusic() {
     const t0 = nextNoteTime;
     const s = step % 16;                              // 16th within the bar
     const bar = Math.floor(step / 16) % song.bars;
+    const meta = song.meta ? song.meta[bar] : DEFAULT_META;
 
     if (s % 2 === 0) { // eighth-note grid
       const e = s / 2;
@@ -323,21 +340,44 @@ function scheduleMusic() {
       if (b) chipNote(song.bassType, b, t0, step16 * 1.6, song.bassGain);
       const l = song.lead[bar][e];
       if (l) {
-        chipNote(song.leadType, l, t0, step16 * 1.7, song.leadGain);
-        // arcade sparkle: quiet octave doubling on the lead
-        if (songName === 'level') chipNote(song.leadType, l + 12, t0, step16 * 1.4, song.leadGain * 0.35);
+        // a note followed by a rest sustains through it (vibrato kicks in)
+        const sustained = e < 7 && song.lead[bar][e + 1] === 0;
+        const dur = sustained ? step16 * 3.6 : step16 * 1.7;
+        chipNote(song.leadType, l, t0, dur, song.leadGain);
+        if (songName === 'level') {
+          // arcade sparkle: quiet octave doubling on the lead
+          chipNote(song.leadType, l + 12, t0, dur * 0.8, song.leadGain * 0.35);
+          // chip delay: the note repeats an eighth later, quietly
+          chipNote(song.leadType, l, t0 + step16 * 2, step16 * 1.2, song.leadGain * 0.22);
+          // chorus bars get a parallel harmony a fourth below (power-chord feel)
+          if (meta.harmony) chipNote('triangle', l - 5, t0, dur, song.leadGain * 0.5);
+        }
       }
     }
-    // 16th-note arpeggio, one octave up, up-down pattern
+    // arpeggio, one octave up — pattern varies by section
     const chord = song.arp[bar];
-    const arpNote = chord[[0, 1, 2, 1][s % 4]] + 12;
-    chipNote(song.arpType, arpNote, t0, step16 * 0.9, song.arpGain);
+    let arpNote = null;
+    if (meta.arp === 'half') { // airy: eighth-notes only
+      if (s % 2 === 0) arpNote = chord[[0, 1, 2, 1][(s / 2) % 4]] + 12;
+    } else if (meta.arp === 'roll') { // 3-against-4 shimmer
+      arpNote = chord[s % 3] + 12;
+    } else if (meta.arp === 'sparkle') { // 16ths leaping between octaves
+      arpNote = chord[[0, 1, 2, 1][s % 4]] + (s % 2 === 0 ? 12 : 24);
+    } else { // 'updown'
+      arpNote = chord[[0, 1, 2, 1][s % 4]] + 12;
+    }
+    if (arpNote !== null) chipNote(song.arpType, arpNote, t0, step16 * 0.9, song.arpGain);
 
     // drums (per-bar kits — sections vary from sparse intro to driving chorus)
     const d = song.drums[bar];
-    if (d.kick.includes(s)) chipNote('sine', 41, t0, 0.09, 0.5); // thump
-    if (d.snare.includes(s)) chipNoise(t0, 0.09, 1800, 0.30);
-    if (s % d.hatEvery === 0) chipNoise(t0, 0.03, 6000, 0.10);
+    if (meta.fill && s >= 12) {
+      // section turnaround: rising 16th snare roll into the next section
+      chipNoise(t0, 0.07, 1600, 0.14 + (s - 12) * 0.05);
+    } else {
+      if (d.kick.includes(s)) chipNote('sine', 41, t0, 0.09, 0.5); // thump
+      if (d.snare.includes(s)) chipNoise(t0, 0.09, 1800, 0.30);
+      if (s % d.hatEvery === 0) chipNoise(t0, 0.03, 6000, 0.10);
+    }
 
     nextNoteTime += step16;
     step++;

@@ -39,7 +39,7 @@ function freshSave() {
     reviewShown: false,
 
     // v4
-    flipControls: false,        // left-handed mode: swap fire and jump sides
+    flipControls: false,        // left-handed mode: action cluster on the left
     hints: {},                  // one-time mechanic hint toasts shown
     xp: 0,
     rank: 1,
