@@ -254,6 +254,8 @@ h2.lose { color: var(--danger); text-shadow: 0 0 14px var(--danger); }
   pointer-events: none;
 }
 .hud-left, .hud-right { display: flex; flex-direction: column; gap: 12px; align-items: center; }
+/* fire sits directly beside jump so one thumb covers both */
+.hud-right { flex-direction: row; align-items: flex-end; }
 .hud-action {
   position: relative;
   width: 74px; height: 74px;
@@ -467,6 +469,8 @@ h2.gold { color: var(--gold); text-shadow: 0 0 14px var(--gold); }
 
 /* ---------- v4: flipped controls (left-handed mode) ---------- */
 #hud.flipped .hud-bottom { flex-direction: row-reverse; }
+/* true mirror: jump stays the outer corner button, fire beside it */
+#hud.flipped .hud-right { flex-direction: row-reverse; }
 
 /* jump charge ring while holding */
 .hud-action.jump { position: relative; }

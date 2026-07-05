@@ -89,7 +89,13 @@ export class Game {
     this.groundInfoForRender = this._sampleGround(0, 0);
   }
 
-  start() { if (this.state === 'ready') this.state = 'running'; }
+  start() {
+    if (this.state !== 'ready') return;
+    // drop drag/taps accumulated on the menus (incl. the launch tap itself),
+    // or the first running frame would consume them as a steer/jump
+    this.input.reset();
+    this.state = 'running';
+  }
 
   get progress() {
     if (!this.level || !isFinite(this.level.length)) return 0;
@@ -671,6 +677,9 @@ export class Game {
       // slow ramp back to full speed so the player can react to what killed them
       this.timeScale = 0.3;
       this._timeScaleTarget = 1;
+      // everything dragged/tapped during the crash, revive modal and rewind
+      // animation is stale — clear it so the restored ship isn't shoved
+      this.input.reset();
       this.state = 'running';
       this.events.onReviveDone?.();
     }

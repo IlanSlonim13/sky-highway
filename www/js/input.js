@@ -26,7 +26,7 @@ export class Input {
       if (e.target.closest('button')) return; // HUD buttons handle themselves
       if (this._steerPointer === null) {
         this._steerPointer = { id: e.pointerId, lastX: e.clientX, downX: e.clientX, downY: e.clientY, downT: performance.now() };
-        surface.setPointerCapture?.(e.pointerId);
+        try { surface.setPointerCapture?.(e.pointerId); } catch { /* synthetic events have no active pointer */ }
       }
     });
     surface.addEventListener('pointermove', (e) => {
@@ -68,6 +68,18 @@ export class Input {
       else this._keys.delete(k);
     });
     window.addEventListener('blur', () => { this._keys.clear(); this.jumpHeld = false; });
+  }
+
+  // Drop all transient state (drag accumulation, leaked steer pointer, queued
+  // taps). Called whenever play (re)starts: drag builds up unconsumed while
+  // the game is not in the running state (menus, crash, rewind animation) and
+  // would otherwise be dumped into steering on the first running frame.
+  reset() {
+    this._dragAccum = 0;
+    this._dragVel = 0;
+    this._steerPointer = null;
+    this._jumpQueued = false;
+    this._fireQueued = false;
   }
 
   // called once per rendered frame by the game loop
