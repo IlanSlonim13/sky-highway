@@ -590,13 +590,17 @@ $('btn-saver-coins').addEventListener('click', () => {
 // ---------------------------------------------------------------------------
 // HUD
 // ---------------------------------------------------------------------------
-$('btn-jump').addEventListener('pointerdown', (e) => { e.stopPropagation(); input.pressJump(); });
+// Capture the pointer so a slight finger slide off the button neither fires
+// pointerleave (which would cut the held jump short) nor lets the pointerup
+// land on the play surface as a phantom tap-jump.
+const captureBtn = (e) => { try { e.currentTarget.setPointerCapture?.(e.pointerId); } catch { /* synthetic */ } };
+$('btn-jump').addEventListener('pointerdown', (e) => { e.stopPropagation(); captureBtn(e); input.pressJump(); });
 for (const ev of ['pointerup', 'pointercancel', 'pointerleave']) {
   $('btn-jump').addEventListener(ev, () => input.releaseJump());
 }
-$('btn-fire').addEventListener('pointerdown', (e) => { e.stopPropagation(); game.shoot(); });
+$('btn-fire').addEventListener('pointerdown', (e) => { e.stopPropagation(); captureBtn(e); game.shoot(); });
 $('btn-slowmo').addEventListener('pointerdown', (e) => {
-  e.stopPropagation();
+  e.stopPropagation(); captureBtn(e);
   if (game.state !== 'running' || game.slowmoLeft > 0) return;
   if (save.get().slowmoCharges > 0) {
     if (game.activateSlowmo()) save.useSlowmo();

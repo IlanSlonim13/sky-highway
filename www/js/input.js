@@ -43,8 +43,9 @@ export class Input {
         const dist = Math.hypot(e.clientX - p.downX, e.clientY - p.downY);
         if (dt < TAP_MS && dist < TAP_PX) this._jumpQueued = true;
         this._steerPointer = null;
-      } else if (e.type === 'pointerup') {
-        // secondary finger quick tap also jumps (two-thumb play)
+      } else if (e.type === 'pointerup' && !e.target.closest('button')) {
+        // secondary finger quick tap also jumps (two-thumb play);
+        // HUD button pointerups bubble here too and must not count
         this._jumpQueued = true;
       }
     };
