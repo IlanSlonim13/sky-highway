@@ -12,7 +12,7 @@ import { createHash } from 'crypto';
 
 // Pinned campaign output: refactors of the generator must not change any of
 // the 100 shipped levels (players' progress refers to these exact layouts).
-const CAMPAIGN_SHA256 = 'd3f9a02a615275f01c32b4e8d6c3cdc774109d0bf920f86eca9f12c325e2e964';
+const CAMPAIGN_SHA256 = '5c0c550bb53ee7abe4db7d790cb92bd5be8b97aad33699e40d10b6ab5846e0e8';
 
 const LEGAL = new Set(Object.values(CELL));
 const verbose = process.argv.includes('--verbose');

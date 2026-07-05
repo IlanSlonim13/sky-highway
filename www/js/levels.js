@@ -889,8 +889,8 @@ function generateAct(seed, difficulty, speed, targetRows, easy = false) {
 function generateLevel(index) {
   const speed = levelSpeed(index);
   const dBase = Math.min(1, (index - 9) / 240); // 0 at lvl 10, 1 at ~lvl 250
-  // per-act length: the original design length (~320 rows early, ~1000 late)
-  const actRows = Math.round(320 + 680 * Math.min(1, (index - 9) / 300));
+  // per-act length (~160 rows early, ~500 late)
+  const actRows = Math.round(160 + 340 * Math.min(1, (index - 9) / 300));
   const acts = [];
   for (let a = 0; a < 3; a++) {
     const seed = (0xA11CE + index * 7919 + a * 0x3779B9) >>> 0;
@@ -905,7 +905,7 @@ function generateLevel(index) {
 function handcraftedLevel(index) {
   const speed = levelSpeed(index);
   const easy = index < 5; // held-jump/hurdle/debris mechanics arrive from L6 acts
-  const actRows = 180 + index * 15;
+  const actRows = 90 + index * 8;
   const acts = [HANDCRAFTED[index]()];
   for (let a = 0; a < 2; a++) {
     const seed = (0xC4AF7 + index * 7919 + a * 0x3779B9) >>> 0;
@@ -929,7 +929,7 @@ export function getDailyLevel(dayKey) {
   // three acts of original design length, each act a notch harder
   for (let act = 0; act < 3; act++) {
     tb.setDifficulty(Math.min(1, difficulty + act * 0.12));
-    const target = tb.rows.length + 420 + Math.floor(rng() * 120);
+    const target = tb.rows.length + 210 + Math.floor(rng() * 60);
     while (tb.rows.length < target) tb.emitOne();
     if (act < 2) tb.open(10); // full-floor breather between acts
   }
