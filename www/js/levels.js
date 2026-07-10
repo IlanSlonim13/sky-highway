@@ -263,21 +263,23 @@ function level4() {
 }
 
 function level5() {
-  // Bounce pads over big gaps + first ammo/destructible wall.
+  // Boost strips before big gaps + first ammo/destructible wall.
   return b()
     .straight(8)
     .floorWith(1, [[-1, CELL.AMMO], [1, CELL.AMMO]])
     .straight(3)
     .raw(['DDDDD##'])      // blast through or swerve right
     .straight(4)
-    .floorWith(1, [[0, CELL.PAD]])
+    .floorWith(1, [[0, CELL.BOOST]])
+    .straight(2)
     .gap(4)
     .straight(5)
     .coins([0])
     .straight(3)
     .raw(['.......', '.......', '...O...', '.......'])  // ring at the top of the arc
     .straight(4)
-    .floorWith(1, [[-1, CELL.PAD], [0, CELL.PAD], [1, CELL.PAD]])
+    .floorWith(1, [[-1, CELL.BOOST], [0, CELL.BOOST], [1, CELL.BOOST]])
+    .straight(2)
     .gap(5)
     .straight(5)
     .bridge(4, -2, 2)
@@ -286,7 +288,8 @@ function level5() {
     .gap(3)
     .straight(4)
     .coins([-1, 0, 1])
-    .floorWith(1, [[0, CELL.PAD]])
+    .floorWith(1, [[0, CELL.BOOST]])
+    .straight(2)
     .gap(5)
     .straight(5)
     .floorWith(2, [[-2, CELL.TALL], [2, CELL.TALL]])
@@ -297,11 +300,13 @@ function level5() {
     .straight(3)
     .raw(['##DDDDD'])
     .straight(4)
-    .floorWith(1, [[-1, CELL.PAD]])
+    .floorWith(1, [[-1, CELL.BOOST]])
+    .straight(2)
     .gap(4)
     .straight(4)
     .coins([0])
-    .floorWith(1, [[1, CELL.PAD]])
+    .floorWith(1, [[1, CELL.BOOST]])
+    .straight(2)
     .gap(5)
     .straight(6)
     .build();
@@ -496,7 +501,8 @@ function level10() {
     .coins([0])
     .floorWith(3, [[-3, CELL.HAZARD], [-2, CELL.HAZARD], [-1, CELL.HAZARD], [1, CELL.HAZARD], [2, CELL.HAZARD], [3, CELL.HAZARD]])
     .straight(3)
-    .floorWith(1, [[0, CELL.PAD]])
+    .floorWith(1, [[0, CELL.BOOST]])
+    .straight(2)
     .gap(5)
     .straight(4)
     .coins([-1, 1])
@@ -530,7 +536,8 @@ function level10() {
     .floorWith(3, [[-3, CELL.HAZARD], [-2, CELL.HAZARD], [0, CELL.HAZARD], [2, CELL.HAZARD], [3, CELL.HAZARD]])
     .straight(3)
     .coins([-1, 1])
-    .floorWith(1, [[0, CELL.PAD]])
+    .floorWith(1, [[0, CELL.BOOST]])
+    .straight(2)
     .gap(5)
     .straight(4)
     .gap(3)
@@ -621,9 +628,11 @@ class TrackBuilder {
       if (safeLanes.has(lane)) { r[i] = opts.pathChar || CELL.FLOOR; continue; }
       if (this.rng() < this.sideFloorP) {
         const roll = this.rng();
-        if (roll < 0.06 * this.difficulty + 0.02) r[i] = CELL.TALL;
-        else if (roll < 0.12 * this.difficulty + 0.05) r[i] = CELL.LOW;
-        else if (roll < 0.16 * this.difficulty + 0.06) r[i] = CELL.HAZARD;
+        // lanes touching the safe corridor stay clearer: breathing room
+        const k = safeLanes.has(lane - 1) || safeLanes.has(lane + 1) ? 0.5 : 1;
+        if (roll < (0.06 * this.difficulty + 0.02) * k) r[i] = CELL.TALL;
+        else if (roll < (0.12 * this.difficulty + 0.05) * k) r[i] = CELL.LOW;
+        else if (roll < (0.16 * this.difficulty + 0.06) * k) r[i] = CELL.HAZARD;
         else r[i] = CELL.FLOOR;
       }
     }
@@ -713,8 +722,8 @@ class TrackBuilder {
     // floating wreckage over the corridor: drive or tap-hop UNDER it (no held jumps)
     const len = 3 + Math.floor(this.rng() * (2 + 4 * this.difficulty));
     for (let i = 0; i < len; i++) {
-      const r = this.decoratedRow(this.safeSet(this.path, 2));
-      for (const l of this.safeSet(this.path, 2)) r[l + L] = CELL.DEBRIS;
+      const r = this.decoratedRow(this.safeSet(this.path, 3));
+      for (const l of this.safeSet(this.path, 3)) r[l + L] = CELL.DEBRIS;
       this.rows.push(r);
     }
     for (let i = 0; i < 2; i++) this.rows.push(this.decoratedRow(this.safeSet(this.path, 3)));
@@ -741,7 +750,7 @@ class TrackBuilder {
 
   patNarrowBridge() {
     const len = 4 + Math.floor(this.rng() * (5 + 6 * this.difficulty));
-    const width = this.rng() < 0.3 + 0.4 * this.difficulty ? 1 : 2;
+    const width = this.rng() < 0.3 + 0.4 * this.difficulty ? 2 : 3;
     for (let i = 0; i < len; i++) {
       const s = this.safeSet(this.path, width);
       const r = emptyRow();
@@ -761,14 +770,15 @@ class TrackBuilder {
   }
 
   patSlalom() {
-    // tall blocks alternate on either side of the path; path stays clear
+    // tall blocks alternate on either side, 2 lanes off-path: the full
+    // 3-wide corridor stays clear so weaving never feels pinched
     const n = 3 + Math.floor(this.rng() * 3);
     for (let k = 0; k < n; k++) {
-      const side = k % 2 === 0 ? 1 : -1;
+      const side = k % 2 === 0 ? 2 : -2;
       const blockLane = Math.max(LANE_MIN, Math.min(LANE_MAX, this.path + side));
       for (let i = 0; i < 2; i++) {
         const r = this.decoratedRow(this.safeSet(this.path, 3));
-        if (blockLane !== this.path) r[blockLane + L] = CELL.TALL;
+        if (Math.abs(blockLane - this.path) === 2) r[blockLane + L] = CELL.TALL;
         this.rows.push(r);
       }
       this.rows.push(this.decoratedRow(this.safeSet(this.path, 3)));
@@ -779,7 +789,7 @@ class TrackBuilder {
     const len = 3 + Math.floor(this.rng() * (3 + 4 * this.difficulty));
     for (let i = 0; i < len; i++) {
       const r = fullRow(CELL.HAZARD);
-      for (const l of this.safeSet(this.path, 2)) r[l + L] = CELL.FLOOR;
+      for (const l of this.safeSet(this.path, 3)) r[l + L] = CELL.FLOOR;
       this.rows.push(r);
     }
     for (let i = 0; i < 2; i++) this.rows.push(this.decoratedRow(this.safeSet(this.path, 3)));
@@ -793,18 +803,19 @@ class TrackBuilder {
     for (let i = 0; i < 8; i++) this.rows.push(this.decoratedRow(this.safeSet(this.path, 3)));
   }
 
-  patBouncePad() {
-    // pad, big gap (cleared by pad's high fling), landing
+  patBoostGap() {
+    // speed strip two tiles before a gap only a BOOSTED held jump clears —
+    // the SkyRoads way to cross big voids (replaces the old auto-bounce pad)
     const r = this.decoratedRow(this.safeSet(this.path, 3));
-    r[this.path + L] = CELL.PAD;
+    for (const l of this.safeSet(this.path, 3)) r[l + L] = CELL.BOOST;
     this.rows.push(r);
-    const gap = Math.min(this.holdG + 1, 4 + Math.floor(this.rng() * 3));
+    for (let i = 0; i < 2; i++) this.rows.push(this.decoratedRow(this.safeSet(this.path, 3)));
+    const gap = this.holdG + 1 + (this.rng() < 0.5 ? 0 : 1);
     for (let i = 0; i < gap; i++) {
       const g = emptyRow();
       if (i % 2 === 0) g[this.path + L] = CELL.COIN_AIR;
       this.rows.push(g);
     }
-    // pad flights span holdG+2 rows from the pad — land anywhere in that arc
     const landing = Math.max(4, this.holdG + 3 - gap);
     for (let i = 0; i < landing; i++) this.rows.push(this.decoratedRow(this.safeSet(this.path, 3)));
   }
@@ -860,7 +871,7 @@ class TrackBuilder {
     if (this.easy) return gentle;
     return gentle.concat([
       [() => this.patHazardCorridor(), 0.4 + this.difficulty],
-      [() => this.patBouncePad(), 0.5 + this.difficulty * 0.4],
+      [() => this.patBoostGap(), 0.5 + this.difficulty * 0.4],
       [() => this.patDestructibleWall(), 0.5 + this.difficulty * 0.6],
       [() => this.patHurdle(), 0.4 + this.difficulty * 0.9],
       [() => this.patDebris(), 0.3 + this.difficulty * 0.9],
