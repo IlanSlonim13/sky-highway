@@ -118,12 +118,18 @@
 
   <!-- ============ IN-GAME HUD ============ -->
   <section id="hud" class="screen transparent">
-    <header class="hud-top">
-      <button id="btn-pause" class="hud-btn">II</button>
-      <div class="progress-wrap"><div id="progress-fill"></div><div id="progress-label">LEVEL 1</div></div>
-      <div id="flow-chip" class="flow-chip">×1</div>
-      <div class="coin-chip small"><span class="coin-ico">◆</span><span id="hud-coins">0</span></div>
-    </header>
+    <div class="hud-top-stack">
+      <header class="hud-top">
+        <button id="btn-pause" class="hud-btn">II</button>
+        <div class="progress-wrap"><div id="progress-fill"></div><div id="progress-label">LEVEL 1</div></div>
+        <div id="flow-chip" class="flow-chip">×1</div>
+        <div class="coin-chip small"><span class="coin-ico">◆</span><span id="hud-coins">0</span></div>
+      </header>
+      <div class="dash-row">
+        <div class="gauge"><span class="gauge-label">FUEL</span><div class="gauge-bar"><div id="fuel-fill"></div></div></div>
+        <div class="gauge speed"><span class="gauge-label">SPD</span><div class="gauge-bar"><div id="speed-fill"></div></div></div>
+      </div>
+    </div>
     <div class="hud-bottom">
       <div class="hud-left">
         <button id="btn-slowmo" class="hud-action slowmo">🐌<span id="slowmo-count" class="badge">0</span></button>

@@ -11,24 +11,25 @@
 // generated designs with difficulty rising act by act. Every level passes the
 // reachability solver in `validateLevel` (see tools/validate-levels.mjs).
 
-import { CELL, TRACK_LANES, PHYSICS, LANE_MIN, LANE_MAX, ENDLESS } from './config.js';
+import { CELL, TRACK_LANES, PHYSICS, LANE_MIN, LANE_MAX, ENDLESS, FUEL } from './config.js';
 
 export const LEVEL_COUNT = 500;
 
 // ---------------------------------------------------------------------------
-// Themes — neon palettes cycled across the campaign.
+// Themes — SkyRoads-style world palettes: black skies, colored horizon
+// bands, flat gray-tinted roads. Cycled across the campaign.
 // ---------------------------------------------------------------------------
 export const THEMES = [
-  { name: 'Neon Dawn',   skyTop: '#050014', skyBot: '#2b0a4e', floor: '#7a2ff0', floorAlt: '#5a1fd0', block: '#ff3d9a', blockDark: '#a91f62', glow: '#c86bff', star: '#b9a0ff' },
-  { name: 'Cyan Rush',   skyTop: '#00050f', skyBot: '#003a52', floor: '#00c2d1', floorAlt: '#0092a1', block: '#ffb300', blockDark: '#a97400', glow: '#5ff2ff', star: '#a0e8ff' },
-  { name: 'Ember Belt',  skyTop: '#0f0202', skyBot: '#4e1200', floor: '#ff6a00', floorAlt: '#c94f00', block: '#ffd000', blockDark: '#a98800', glow: '#ff9d5c', star: '#ffc9a0' },
-  { name: 'Viridia',     skyTop: '#01100a', skyBot: '#0a4e2b', floor: '#12d97c', floorAlt: '#0aa95c', block: '#e8ff3d', blockDark: '#96a91f', glow: '#6bffb8', star: '#a0ffcf' },
-  { name: 'Magenta Void',skyTop: '#0d0014', skyBot: '#3a0a4e', floor: '#e02fd0', floorAlt: '#a81f9c', block: '#3d9aff', blockDark: '#1f62a9', glow: '#ff6bf2', star: '#f2a0ff' },
-  { name: 'Arctic Line', skyTop: '#02060f', skyBot: '#0a2a4e', floor: '#4d8dff', floorAlt: '#2f63c9', block: '#ff5c7a', blockDark: '#a93248', glow: '#8ab8ff', star: '#cfe0ff' },
-  { name: 'Solar Wind',  skyTop: '#0f0a00', skyBot: '#4e3a0a', floor: '#ffcf3d', floorAlt: '#c99e1f', block: '#ff3d5c', blockDark: '#a91f38', glow: '#ffe08a', star: '#fff0c0' },
-  { name: 'Deep Signal', skyTop: '#00000a', skyBot: '#101a52', floor: '#5c6bff', floorAlt: '#3a45c9', block: '#00e0b0', blockDark: '#009a78', glow: '#9aa5ff', star: '#c0c8ff' },
-  { name: 'Rose Orbit',  skyTop: '#10000a', skyBot: '#520a2e', floor: '#ff4d88', floorAlt: '#c92f63', block: '#b06bff', blockDark: '#7038a9', glow: '#ff8ab0', star: '#ffc0d8' },
-  { name: 'Chrome City', skyTop: '#050508', skyBot: '#2e3038', floor: '#c0c8d8', floorAlt: '#8a92a4', block: '#5ff2ff', blockDark: '#3a9aa4', glow: '#e8f0ff', star: '#ffffff' },
+  { name: 'Blue Heaven',  skyTop: '#000008', skyBot: '#1c3a72', floor: '#747c8c', floorAlt: '#4c5464', block: '#5878b0', blockDark: '#2c3c5c', glow: '#88a8e0', star: '#e8ecf4' },
+  { name: 'Red Heat',     skyTop: '#040000', skyBot: '#6a1408', floor: '#857466', floorAlt: '#584a3e', block: '#b04838', blockDark: '#5c221a', glow: '#d87858', star: '#f0e4dc' },
+  { name: 'Emerald Run',  skyTop: '#000402', skyBot: '#0e4a2a', floor: '#707f76', floorAlt: '#48544c', block: '#3c9860', blockDark: '#1e4c30', glow: '#68c890', star: '#e4f0e8' },
+  { name: 'Dune Strip',   skyTop: '#040200', skyBot: '#6a4a14', floor: '#8f8064', floorAlt: '#5c5240', block: '#b08840', blockDark: '#5c4620', glow: '#d8b068', star: '#f4ecdc' },
+  { name: 'Ice Field',    skyTop: '#000206', skyBot: '#2a5a7a', floor: '#8898a4', floorAlt: '#586470', block: '#68a0c0', blockDark: '#345264', glow: '#98c8e8', star: '#f0f8ff' },
+  { name: 'Violet Dusk',  skyTop: '#020006', skyBot: '#42246a', floor: '#7e7689', floorAlt: '#524a5c', block: '#7858a8', blockDark: '#3c2c56', glow: '#a888d8', star: '#ece4f4' },
+  { name: 'Rust Belt',    skyTop: '#030100', skyBot: '#5c3010', floor: '#857062', floorAlt: '#544438', block: '#a86030', blockDark: '#563018', glow: '#d09058', star: '#f0e8e0' },
+  { name: 'Teal Passage', skyTop: '#000404', skyBot: '#0e4a52', floor: '#748386', floorAlt: '#4a5658', block: '#3c8898', blockDark: '#1e444c', glow: '#68b8c8', star: '#e4f0f2' },
+  { name: 'Ash Plain',    skyTop: '#020202', skyBot: '#3c3c44', floor: '#7a7a82', floorAlt: '#4e4e56', block: '#6a6a78', blockDark: '#36363e', glow: '#a8a8b8', star: '#f0f0f4' },
+  { name: 'Gold Horizon', skyTop: '#030200', skyBot: '#7a5a10', floor: '#887e58', floorAlt: '#585036', block: '#b89c38', blockDark: '#5e501c', glow: '#e0c060', star: '#f8f0d8' },
 ];
 
 // ---------------------------------------------------------------------------
@@ -599,6 +600,7 @@ class TrackBuilder {
     this.easy = easy;   // tutorial acts: steering + tap jumps only
     this.rows = [];
     this.path = 0; // current guaranteed-safe lane
+    this._lastFuelRow = 0; // the tank starts full, so row 0 counts as fueled
     this.setDifficulty(difficulty);
   }
 
@@ -639,6 +641,16 @@ class TrackBuilder {
   }
 
   // --- pattern emitters ------------------------------------------------
+  // blue supplies strip (SkyRoads): full-width refuel rows, flanked by
+  // plain floor so a landing on the strip is always safe
+  patSupplies() {
+    this.rows.push(fullRow());
+    this.rows.push(fullRow(CELL.FUEL));
+    this.rows.push(fullRow(CELL.FUEL));
+    this.rows.push(fullRow());
+    this._lastFuelRow = this.rows.length - 2;
+  }
+
   patStraight(n) {
     for (let i = 0; i < n; i++) {
       const r = this.decoratedRow(this.safeSet(this.path, 3));
@@ -857,6 +869,11 @@ class TrackBuilder {
   }
 
   emitOne() {
+    // guarantee refuel opportunities more often than the tank runs dry
+    if (this.rows.length - this._lastFuelRow >= FUEL.stripInterval) {
+      this.patSupplies();
+      return;
+    }
     const patterns = this.patternTable();
     const totalW = patterns.reduce((s, [, w]) => s + w, 0);
     let roll = this.rng() * totalW;
@@ -881,6 +898,7 @@ function generateAct(seed, difficulty, speed, targetRows, easy = false) {
   const rng = mulberry32(seed >>> 0);
   const tb = new TrackBuilder(rng, difficulty, tapGap(speed), holdGap(speed), easy);
   tb.open(8);
+  tb.patSupplies();
   while (tb.rows.length < targetRows) tb.emitOne();
   tb.close(6);
   return tb.takeRows();
@@ -1035,7 +1053,8 @@ export function validateLevel(level) {
 
   const groundOK = (ch) =>
     ch === CELL.FLOOR || ch === CELL.BOOST || ch === CELL.PAD ||
-    ch === CELL.COIN || ch === CELL.AMMO || ch === CELL.DEBRIS; // floor under wreckage
+    ch === CELL.COIN || ch === CELL.AMMO || ch === CELL.FUEL ||
+    ch === CELL.DEBRIS; // floor under wreckage
   // destructibles count as walls here: levels must be completable with zero shots.
   // Air legality depends on the jump kind:
   //   hurdle '=' (0.9): too high for a tap, cleared by held/pad arcs

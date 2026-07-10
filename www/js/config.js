@@ -80,6 +80,14 @@ export const WEAPON = {
   destroyReward: 5,       // coins per destroyed barrier
 };
 
+// SkyRoads-style fuel: drains with distance, refilled to full by blue
+// supplies strips on the track. Empty tank = crash.
+export const FUEL = {
+  tankRows: 420,        // rows of travel on a full tank
+  stripInterval: 140,   // generator guarantees a supplies strip at least this often
+  warnAt: 0.28,         // gauge flashes below this fraction
+};
+
 export const MAX_REVIVES_PER_RUN = 2;
 
 export const ENDLESS = {
@@ -160,4 +168,5 @@ export const CELL = {
   HURDLE: '=',   // energy fence (0.9 high) — needs a HELD jump
   DEBRIS: '~',   // floating wreckage over floor — tap-hop or drive UNDER it
   RING: 'O',     // glowing ring over the void — thread it mid held-jump for coins
+  FUEL: 'F',     // blue supplies tile — driving over it refills the tank
 };

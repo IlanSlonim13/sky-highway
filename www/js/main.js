@@ -1,7 +1,7 @@
 // Sky Highway — bootstrap and UI wiring (v2: modes, daily, endless, echoes,
 // missions, hangar, piggy bank, premium).
 
-import { ECONOMY, ADS, MAX_REVIVES_PER_RUN, PIGGY, ECHO, APP_VERSION, PHYSICS } from './config.js';
+import { ECONOMY, ADS, MAX_REVIVES_PER_RUN, PIGGY, ECHO, APP_VERSION, PHYSICS, FUEL } from './config.js';
 import { getLevel, LEVEL_COUNT, getDailyLevel, createEndlessTrack } from './levels.js';
 import { save } from './save.js';
 import * as audio from './audio.js';
@@ -456,6 +456,7 @@ const CRASH_LINES = {
   fall: 'LOST IN THE VOID',
   debris: 'CLIPPED THE SPACE DEBRIS',
   comet: 'OBLITERATED BY A COMET',
+  fuel: 'RAN OUT OF FUEL',
 };
 
 function openReviveModal() {
@@ -633,6 +634,11 @@ function syncHud() {
     $('progress-fill').style.width = `${game.progress * 100}%`;
   }
   $('hud-coins').textContent = game.runCoins;
+  // dashboard gauges: fuel drains with distance, speed shows the boost kick
+  const fuelFill = $('fuel-fill');
+  fuelFill.style.width = `${Math.max(0, game.fuel) * 100}%`;
+  fuelFill.classList.toggle('low', game.fuel < FUEL.warnAt);
+  $('speed-fill').style.width = `${Math.min(1, (game.currentSpeed * game.ship.speedMul) / 16) * 100}%`;
   $('ammo-count').textContent = game.ammo;
   $('btn-fire').disabled = game.ammo <= 0;
   const sm = save.get().slowmoCharges;

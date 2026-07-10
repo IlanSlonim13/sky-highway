@@ -7,7 +7,7 @@
 
 import {
   PHYSICS, SHIP, BOOST, SLOWMO, REWIND, CELL, BLOCK_HEIGHTS, WEAPON, FLOW, CAMERA,
-  DEBRIS, RING, COMETS,
+  DEBRIS, RING, COMETS, FUEL,
 } from './config.js';
 import { sfx } from './audio.js';
 import { EchoRecorder } from './echo.js';
@@ -60,6 +60,7 @@ export class Game {
     this._timeScaleTarget = 1;
 
     this.runCoins = 0;
+    this.fuel = 1; // full tank; drains with distance, refilled by supplies strips
     this.ammo = Math.min(WEAPON.maxAmmo, startAmmo);
     this.collected = new Set();
     this._collectedOrder = [];
@@ -218,7 +219,14 @@ export class Game {
       s.boostT -= dt;
       s.speedMul = 1 + (BOOST.speedMultiplier - 1) * Math.min(1, s.boostT / (BOOST.duration * 0.6));
     } else s.speedMul = 1;
-    s.z += this.currentSpeed * s.speedMul * dt;
+    const dz = this.currentSpeed * s.speedMul * dt;
+    s.z += dz;
+
+    // --- fuel: drains with distance (attract-mode demo flies for free) ---
+    if (!this.attract) {
+      this.fuel -= dz / FUEL.tankRows;
+      if (this.fuel <= 0) { this.fuel = 0; return this._crash('fuel'); }
+    }
 
     // --- lateral: touch drag is direct, keyboard is velocity-based ---
     const drag = this.input.consumeDrag();
@@ -270,6 +278,7 @@ export class Game {
       } else {
         s.y = g.height;
         if (g.hazard) return this._crash('burn');
+        if (g.fuel && this.fuel < 0.999) { this.fuel = 1; sfx.ammo(); }
         if (g.pad) { s.vy = PHYSICS.bouncePadVelocity; s.grounded = false; this._sustain = false; sfx.pad(); }
         else if (g.boost && s.boostT <= BOOST.duration * 0.3) { s.boostT = BOOST.duration; sfx.boost(); }
       }
@@ -305,6 +314,7 @@ export class Game {
           this._takeoffZ = null;
           sfx.land();
           if (g.hazard) return this._crash('burn');
+          if (g.fuel && this.fuel < 0.999) { this.fuel = 1; sfx.ammo(); }
           if (g.pad) { s.vy = PHYSICS.bouncePadVelocity; s.grounded = false; this._sustain = false; sfx.pad(); }
           else if (g.boost && s.boostT <= BOOST.duration * 0.3) { s.boostT = BOOST.duration; sfx.boost(); }
         } else if (s.y < g.height - 0.05) {
@@ -399,7 +409,7 @@ export class Game {
         x: s.x, y: s.y, z: s.z, vy: s.vy, vx: s.vx,
         grounded: s.grounded, speedMul: s.speedMul, boostT: s.boostT,
         runCoins: this.runCoins, collectedCount: this._collectedOrder.length,
-        ammo: this.ammo, destroyedCount: this._destroyedOrder.length,
+        ammo: this.ammo, fuel: this.fuel, destroyedCount: this._destroyedOrder.length,
       });
       const cap = REWIND.historyHz * REWIND.historySeconds;
       if (this.history.length > cap) this.history.shift();
@@ -431,7 +441,7 @@ export class Game {
   _groundHeightOf(ch, key) {
     switch (ch) {
       case CELL.FLOOR: case CELL.BOOST: case CELL.PAD:
-      case CELL.COIN: case CELL.AMMO: case CELL.HAZARD:
+      case CELL.COIN: case CELL.AMMO: case CELL.HAZARD: case CELL.FUEL:
         return 0;
       case CELL.LOW: return BLOCK_HEIGHTS.low;
       case CELL.TALL: return BLOCK_HEIGHTS.tall;
@@ -459,6 +469,7 @@ export class Game {
       hazard: centerCh === CELL.HAZARD,
       pad: centerCh === CELL.PAD,
       boost: centerCh === CELL.BOOST,
+      fuel: centerCh === CELL.FUEL,
     };
   }
 
@@ -663,6 +674,8 @@ export class Game {
       }
       this.runCoins = snap.runCoins;
       this.ammo = snap.ammo;
+      // old snapshots (pre-fuel) have no fuel field: restore a full tank
+      this.fuel = snap.fuel ?? 1;
       this.time = snap.t;
       this._cometTimer = COMETS.basePeriodS * 0.6; // grace after a revive
       this.runStats.revives++;

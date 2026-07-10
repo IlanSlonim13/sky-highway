@@ -7,12 +7,12 @@
 // Usage: node tools/validate-levels.mjs [--verbose]
 
 import { getLevel, validateLevel, LEVEL_COUNT, maxJumpGap, getDailyLevel } from '../www/js/levels.js';
-import { CELL, TRACK_LANES } from '../www/js/config.js';
+import { CELL, TRACK_LANES, FUEL } from '../www/js/config.js';
 import { createHash } from 'crypto';
 
 // Pinned campaign output: refactors of the generator must not change any of
 // the 100 shipped levels (players' progress refers to these exact layouts).
-const CAMPAIGN_SHA256 = '5c0c550bb53ee7abe4db7d790cb92bd5be8b97aad33699e40d10b6ab5846e0e8';
+const CAMPAIGN_SHA256 = '6fedce0f3fad4506fd8708ba0d78b07257e44244c23065adfc5975b152aac529';
 
 const LEGAL = new Set(Object.values(CELL));
 const verbose = process.argv.includes('--verbose');
@@ -36,6 +36,15 @@ for (let i = 0; i < LEVEL_COUNT; i++) {
 
   // --- solvability ---
   if (!validateLevel(level)) problems.push('NOT SOLVABLE');
+
+  // --- fuel feasibility: a full-width supplies strip must appear before the
+  // tank (full at start / after any strip) can run dry, with safety margin ---
+  const maxGap = Math.floor(FUEL.tankRows * 0.7);
+  let lastFuel = 0;
+  for (let r = 0; r < level.rows.length; r++) {
+    if (level.rows[r].includes(CELL.FUEL)) { lastFuel = r; continue; }
+    if (r - lastFuel > maxGap) { problems.push(`fuel gap ${r - lastFuel} rows after row ${lastFuel} (max ${maxGap})`); break; }
+  }
 
   // --- stats ---
   stats.rows += level.rows.length;
