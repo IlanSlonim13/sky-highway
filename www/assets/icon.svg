@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#0b0026"/>
+      <stop offset="1" stop-color="#2b0a4e"/>
+    </linearGradient>
+    <linearGradient id="ship" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f2f6ff"/>
+      <stop offset="0.45" stop-color="#c86bff"/>
+      <stop offset="1" stop-color="#5a2fa0"/>
+    </linearGradient>
+    <linearGradient id="flame" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#57c8ff"/>
+      <stop offset="1" stop-color="#57c8ff" stop-opacity="0"/>
+    </linearGradient>
+    <filter id="glow"><feGaussianBlur stdDeviation="10" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+  </defs>
+  <rect width="512" height="512" rx="110" fill="url(#bg)"/>
+  <!-- stars -->
+  <g fill="#b9a0ff">
+    <circle cx="90" cy="90" r="4"/><circle cx="420" cy="70" r="3"/><circle cx="360" cy="140" r="2.5"/>
+    <circle cx="70" cy="220" r="2.5"/><circle cx="450" cy="240" r="3.5"/><circle cx="150" cy="60" r="2"/>
+  </g>
+  <!-- track -->
+  <g filter="url(#glow)">
+    <path d="M 216 470 L 246 210 L 266 210 L 296 470 Z" fill="#7a2ff0" opacity="0.85"/>
+    <path d="M 130 470 L 196 240 L 212 260 L 176 470 Z" fill="#5a1fd0" opacity="0.6"/>
+    <path d="M 382 470 L 316 240 L 300 260 L 336 470 Z" fill="#5a1fd0" opacity="0.6"/>
+  </g>
+  <!-- flame -->
+  <path d="M 236 330 L 276 330 L 256 420 Z" fill="url(#flame)" filter="url(#glow)"/>
+  <!-- ship -->
+  <g filter="url(#glow)">
+    <path d="M 256 120 L 282 250 L 344 300 L 288 288 L 276 312 L 236 312 L 224 288 L 168 300 L 230 250 Z" fill="url(#ship)"/>
+    <ellipse cx="256" cy="205" rx="12" ry="26" fill="#ffffff" opacity="0.9"/>
+  </g>
+</svg>

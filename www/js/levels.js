@@ -1,0 +1,1149 @@
+// Sky Highway — level definitions.
+//
+// A level is { name, speed, theme, rows } where rows is an array of 7-char
+// strings (lane -3 .. lane +3), row 0 being the start line. Cell characters
+// are defined in config.js (CELL).
+//
+// Every level is a three-act journey: three distinct original-length track
+// designs stitched back to back (each act opens and closes on full floor, so
+// the seams are always safe). Levels 1-10 use a handcrafted design as act one
+// plus two gentle generated acts; levels 11+ stitch three differently-seeded
+// generated designs with difficulty rising act by act. Every level passes the
+// reachability solver in `validateLevel` (see tools/validate-levels.mjs).
+
+import { CELL, TRACK_LANES, PHYSICS, LANE_MIN, LANE_MAX, ENDLESS, FUEL } from './config.js';
+
+export const LEVEL_COUNT = 500;
+
+// ---------------------------------------------------------------------------
+// Themes — SkyRoads-style world palettes: black skies, colored horizon
+// bands, flat gray-tinted roads. Cycled across the campaign.
+// ---------------------------------------------------------------------------
+export const THEMES = [
+  { name: 'Blue Heaven',  skyTop: '#000008', skyBot: '#1c3a72', floor: '#747c8c', floorAlt: '#4c5464', block: '#5878b0', blockDark: '#2c3c5c', glow: '#88a8e0', star: '#e8ecf4' },
+  { name: 'Red Heat',     skyTop: '#040000', skyBot: '#6a1408', floor: '#857466', floorAlt: '#584a3e', block: '#b04838', blockDark: '#5c221a', glow: '#d87858', star: '#f0e4dc' },
+  { name: 'Emerald Run',  skyTop: '#000402', skyBot: '#0e4a2a', floor: '#707f76', floorAlt: '#48544c', block: '#3c9860', blockDark: '#1e4c30', glow: '#68c890', star: '#e4f0e8' },
+  { name: 'Dune Strip',   skyTop: '#040200', skyBot: '#6a4a14', floor: '#8f8064', floorAlt: '#5c5240', block: '#b08840', blockDark: '#5c4620', glow: '#d8b068', star: '#f4ecdc' },
+  { name: 'Ice Field',    skyTop: '#000206', skyBot: '#2a5a7a', floor: '#8898a4', floorAlt: '#586470', block: '#68a0c0', blockDark: '#345264', glow: '#98c8e8', star: '#f0f8ff' },
+  { name: 'Violet Dusk',  skyTop: '#020006', skyBot: '#42246a', floor: '#7e7689', floorAlt: '#524a5c', block: '#7858a8', blockDark: '#3c2c56', glow: '#a888d8', star: '#ece4f4' },
+  { name: 'Rust Belt',    skyTop: '#030100', skyBot: '#5c3010', floor: '#857062', floorAlt: '#544438', block: '#a86030', blockDark: '#563018', glow: '#d09058', star: '#f0e8e0' },
+  { name: 'Teal Passage', skyTop: '#000404', skyBot: '#0e4a52', floor: '#748386', floorAlt: '#4a5658', block: '#3c8898', blockDark: '#1e444c', glow: '#68b8c8', star: '#e4f0f2' },
+  { name: 'Ash Plain',    skyTop: '#020202', skyBot: '#3c3c44', floor: '#7a7a82', floorAlt: '#4e4e56', block: '#6a6a78', blockDark: '#36363e', glow: '#a8a8b8', star: '#f0f0f4' },
+  { name: 'Gold Horizon', skyTop: '#030200', skyBot: '#7a5a10', floor: '#887e58', floorAlt: '#585036', block: '#b89c38', blockDark: '#5e501c', glow: '#e0c060', star: '#f8f0d8' },
+];
+
+// ---------------------------------------------------------------------------
+// Builder DSL — rows are built as arrays of 7 chars then joined.
+// Lane arguments use -3..+3; row helpers return arrays of row strings.
+// ---------------------------------------------------------------------------
+const L = 3; // lane offset: lane -3 -> index 0
+
+function emptyRow() { return CELL.EMPTY.repeat(TRACK_LANES).split(''); }
+function fullRow(ch = CELL.FLOOR) { return ch.repeat(TRACK_LANES).split(''); }
+
+class Builder {
+  constructor() { this.rows = []; }
+
+  // n rows of full floor
+  straight(n) {
+    for (let i = 0; i < n; i++) this.rows.push(fullRow());
+    return this;
+  }
+
+  // n rows where only lanes [from..to] have floor
+  bridge(n, from, to, ch = CELL.FLOOR) {
+    for (let i = 0; i < n; i++) {
+      const r = emptyRow();
+      for (let l = from; l <= to; l++) r[l + L] = ch;
+      this.rows.push(r);
+    }
+    return this;
+  }
+
+  // n rows of full-width gap
+  gap(n) {
+    for (let i = 0; i < n; i++) this.rows.push(emptyRow());
+    return this;
+  }
+
+  // full floor rows with specific cells overridden: over = [[lane, ch], ...]
+  floorWith(n, over) {
+    for (let i = 0; i < n; i++) {
+      const r = fullRow();
+      for (const [l, ch] of over) r[l + L] = ch;
+      this.rows.push(r);
+    }
+    return this;
+  }
+
+  // raw rows as 7-char strings (nearest first)
+  raw(strings) {
+    for (const s of strings) {
+      if (s.length !== TRACK_LANES) throw new Error(`bad row: "${s}"`);
+      this.rows.push(s.split(''));
+    }
+    return this;
+  }
+
+  // a single full row with a coin at each given lane
+  coins(lanes) {
+    const r = fullRow();
+    for (const l of lanes) r[l + L] = CELL.COIN;
+    this.rows.push(r);
+    return this;
+  }
+
+  build() { return this.rows.map((r) => r.join('')); }
+}
+
+function b() { return new Builder(); }
+
+// ---------------------------------------------------------------------------
+// Handcrafted levels 1-10.
+// Speeds ramp 6.5 -> 9.2; each level introduces one mechanic.
+// ---------------------------------------------------------------------------
+
+function level1() {
+  // Tutorial: steering and simple gaps.
+  return b()
+    .straight(10)
+    .coins([0]).coins([0]).coins([0])
+    .straight(4)
+    .gap(2)
+    .straight(6)
+    .coins([-1, 1])
+    .straight(3)
+    .gap(2)
+    .straight(5)
+    .bridge(6, -3, 0)      // right half missing — steer left
+    .straight(5)
+    .coins([-2, 0, 2])
+    .bridge(6, 0, 3)       // left half missing — steer right
+    .straight(4)
+    .gap(2)
+    .straight(4)
+    .coins([0]).coins([0])
+    .straight(4)
+    .bridge(6, -3, 1)
+    .straight(4)
+    .gap(2)
+    .straight(5)
+    .coins([-1, 0, 1])
+    .bridge(6, -1, 3)
+    .straight(4)
+    .gap(2)
+    .straight(4)
+    .coins([0])
+    .bridge(5, -2, 2)
+    .straight(4)
+    .gap(2)
+    .straight(6)
+    .build();
+}
+
+function level2() {
+  // Introduce low blocks (jump over) and boost pads.
+  return b()
+    .straight(8)
+    .floorWith(1, [[0, CELL.LOW]])
+    .straight(5)
+    .floorWith(1, [[-1, CELL.LOW], [0, CELL.LOW], [1, CELL.LOW]])
+    .straight(5)
+    .coins([0])
+    .gap(2)
+    .straight(5)
+    .gap(4)                       // wide gap: HOLD the jump to clear it
+    .straight(5)
+    .floorWith(1, [[0, CELL.BOOST]])
+    .straight(6)
+    .floorWith(1, [[-2, CELL.LOW], [-1, CELL.LOW], [0, CELL.LOW], [1, CELL.LOW], [2, CELL.LOW]])
+    .straight(5)
+    .coins([-1, 0, 1])
+    .bridge(5, -1, 3)
+    .floorWith(1, [[1, CELL.LOW], [2, CELL.LOW]])
+    .straight(4)
+    .gap(3)
+    .straight(5)
+    .coins([0]).coins([0])
+    .straight(4)
+    .floorWith(1, [[-1, CELL.LOW], [0, CELL.LOW]])
+    .straight(4)
+    .floorWith(1, [[1, CELL.LOW], [2, CELL.LOW]])
+    .straight(4)
+    .floorWith(1, [[0, CELL.BOOST]])
+    .straight(6)
+    .floorWith(1, [[-2, CELL.LOW], [-1, CELL.LOW], [0, CELL.LOW], [1, CELL.LOW], [2, CELL.LOW], [3, CELL.LOW]])
+    .straight(4)
+    .coins([-1, 1])
+    .gap(3)
+    .straight(4)
+    .floorWith(1, [[0, CELL.LOW]])
+    .straight(6)
+    .build();
+}
+
+function level3() {
+  // Tall blocks — weave, don't jump.
+  return b()
+    .straight(8)
+    .floorWith(2, [[-1, CELL.TALL]])
+    .straight(3)
+    .floorWith(2, [[1, CELL.TALL]])
+    .straight(3)
+    .floorWith(2, [[0, CELL.TALL], [-3, CELL.TALL], [3, CELL.TALL]])
+    .straight(4)
+    .raw(['======='])             // energy fence: needs a HELD jump
+    .straight(4)
+    .coins([-2, 2])
+    .gap(2)
+    .straight(4)
+    .floorWith(2, [[-2, CELL.TALL], [2, CELL.TALL]])
+    .floorWith(2, [[0, CELL.TALL]])
+    .straight(4)
+    .bridge(6, -3, 1)
+    .floorWith(2, [[-1, CELL.TALL]])
+    .straight(3)
+    .coins([0])
+    .floorWith(2, [[-3, CELL.TALL], [-2, CELL.TALL], [1, CELL.TALL], [2, CELL.TALL], [3, CELL.TALL]])
+    .straight(5)
+    .gap(2)
+    .straight(4)
+    .floorWith(2, [[-2, CELL.TALL]])
+    .straight(2)
+    .floorWith(2, [[2, CELL.TALL]])
+    .straight(2)
+    .floorWith(2, [[0, CELL.TALL]])
+    .straight(3)
+    .coins([-1, 1])
+    .floorWith(2, [[-3, CELL.TALL], [-1, CELL.TALL], [1, CELL.TALL], [3, CELL.TALL]])
+    .straight(4)
+    .bridge(6, 0, 3)
+    .floorWith(2, [[2, CELL.TALL]])
+    .straight(3)
+    .gap(2)
+    .straight(6)
+    .build();
+}
+
+function level4() {
+  // Hazard tiles.
+  return b()
+    .straight(8)
+    .floorWith(2, [[0, CELL.HAZARD]])
+    .straight(4)
+    .floorWith(2, [[-3, CELL.HAZARD], [-2, CELL.HAZARD], [-1, CELL.HAZARD]])
+    .straight(4)
+    .floorWith(2, [[1, CELL.HAZARD], [2, CELL.HAZARD], [3, CELL.HAZARD]])
+    .straight(4)
+    .coins([0])
+    .gap(2)
+    .straight(3)
+    // hazard corridor: only center lane safe
+    .floorWith(4, [[-3, CELL.HAZARD], [-2, CELL.HAZARD], [-1, CELL.HAZARD], [1, CELL.HAZARD], [2, CELL.HAZARD], [3, CELL.HAZARD]])
+    .straight(4)
+    .coins([-1, 1])
+    .floorWith(1, [[0, CELL.LOW]])
+    .straight(3)
+    .floorWith(3, [[-1, CELL.HAZARD], [0, CELL.HAZARD], [1, CELL.HAZARD]]) // jumpable hazard strip? steer around
+    .straight(4)
+    .gap(3)
+    .straight(4)
+    .coins([0]).coins([0])
+    .straight(4)
+    .floorWith(3, [[-3, CELL.HAZARD], [-2, CELL.HAZARD], [1, CELL.HAZARD], [2, CELL.HAZARD], [3, CELL.HAZARD]])
+    .straight(3)
+    .floorWith(3, [[-1, CELL.HAZARD], [0, CELL.HAZARD], [1, CELL.HAZARD], [3, CELL.HAZARD]])
+    .straight(4)
+    .coins([-2])
+    .floorWith(4, [[-3, CELL.HAZARD], [-2, CELL.HAZARD], [-1, CELL.HAZARD], [0, CELL.HAZARD], [2, CELL.HAZARD], [3, CELL.HAZARD]])
+    .straight(4)
+    .gap(2)
+    .straight(6)
+    .build();
+}
+
+function level5() {
+  // Boost strips before big gaps + first ammo/destructible wall.
+  return b()
+    .straight(8)
+    .floorWith(1, [[-1, CELL.AMMO], [1, CELL.AMMO]])
+    .straight(3)
+    .raw(['DDDDD##'])      // blast through or swerve right
+    .straight(4)
+    .floorWith(1, [[0, CELL.BOOST]])
+    .straight(2)
+    .gap(4)
+    .straight(5)
+    .coins([0])
+    .straight(3)
+    .raw(['.......', '.......', '...O...', '.......'])  // ring at the top of the arc
+    .straight(4)
+    .floorWith(1, [[-1, CELL.BOOST], [0, CELL.BOOST], [1, CELL.BOOST]])
+    .straight(2)
+    .gap(5)
+    .straight(5)
+    .bridge(4, -2, 2)
+    .floorWith(1, [[0, CELL.BOOST]])
+    .straight(4)
+    .gap(3)
+    .straight(4)
+    .coins([-1, 0, 1])
+    .floorWith(1, [[0, CELL.BOOST]])
+    .straight(2)
+    .gap(5)
+    .straight(5)
+    .floorWith(2, [[-2, CELL.TALL], [2, CELL.TALL]])
+    .straight(4)
+    .gap(2)
+    .straight(4)
+    .floorWith(1, [[0, CELL.AMMO]])
+    .straight(3)
+    .raw(['##DDDDD'])
+    .straight(4)
+    .floorWith(1, [[-1, CELL.BOOST]])
+    .straight(2)
+    .gap(4)
+    .straight(4)
+    .coins([0])
+    .floorWith(1, [[1, CELL.BOOST]])
+    .straight(2)
+    .gap(5)
+    .straight(6)
+    .build();
+}
+
+function level6() {
+  // Narrow bridges under pressure.
+  return b()
+    .straight(8)
+    .floorWith(4, [[-1, CELL.DEBRIS], [0, CELL.DEBRIS], [1, CELL.DEBRIS]])
+    .straight(3)
+    .bridge(6, -1, 1)
+    .straight(3)
+    .bridge(8, 0, 0)          // single-lane center bridge
+    .straight(4)
+    .coins([0])
+    .bridge(5, -3, -2)        // far-left bridge
+    .straight(9)              // room to cross the whole track
+    .bridge(5, 2, 3)          // far-right bridge
+    .straight(4)
+    .gap(2)
+    .bridge(6, -1, 1)
+    .floorWith(1, [[0, CELL.LOW]])
+    .bridge(4, -1, 1)
+    .straight(4)
+    .coins([-1, 1])
+    .bridge(8, 1, 1)          // single lane, off-center
+    .straight(5)
+    .gap(3)
+    .straight(4)
+    .bridge(7, -1, 0)
+    .straight(3)
+    .bridge(7, 0, 1)
+    .straight(3)
+    .coins([0])
+    .bridge(9, 0, 0)
+    .straight(4)
+    .gap(2)
+    .bridge(5, -2, 0)
+    .straight(6)
+    .build();
+}
+
+function level7() {
+  // Mixed: gaps + low blocks chained.
+  return b()
+    .straight(8)
+    .floorWith(1, [[-1, CELL.LOW], [0, CELL.LOW], [1, CELL.LOW]])
+    .straight(3)
+    .gap(3)
+    .straight(3)
+    .floorWith(1, [[0, CELL.LOW], [1, CELL.LOW], [2, CELL.LOW], [3, CELL.LOW]])
+    .straight(3)
+    .coins([0])
+    .floorWith(1, [[0, CELL.AMMO]])
+    .straight(3)
+    .raw(['##DDDDD'])      // wall with the left side open
+    .straight(3)
+    .gap(3)
+    .bridge(5, -2, 2)
+    .floorWith(1, [[-2, CELL.LOW], [-1, CELL.LOW], [0, CELL.LOW]])
+    .bridge(4, -2, 2)
+    .straight(3)
+    .floorWith(1, [[0, CELL.BOOST]])
+    .gap(4)
+    .straight(4)
+    .coins([-2, 0, 2])
+    .floorWith(1, [[-3, CELL.LOW], [-2, CELL.LOW], [-1, CELL.LOW], [0, CELL.LOW], [1, CELL.LOW]])
+    .straight(3)
+    .gap(3)
+    .straight(4)
+    .floorWith(1, [[-1, CELL.LOW], [0, CELL.LOW], [1, CELL.LOW]])
+    .straight(3)
+    .gap(3)
+    .straight(3)
+    .floorWith(1, [[0, CELL.BOOST]])
+    .gap(4)
+    .straight(4)
+    .coins([0, 1])
+    .floorWith(1, [[-3, CELL.LOW], [-2, CELL.LOW], [2, CELL.LOW], [3, CELL.LOW]])
+    .straight(3)
+    .gap(3)
+    .straight(6)
+    .build();
+}
+
+function level8() {
+  // Hazard weave + tall block maze.
+  return b()
+    .straight(8)
+    .floorWith(3, [[-3, CELL.HAZARD], [-2, CELL.HAZARD], [2, CELL.HAZARD], [3, CELL.HAZARD]])
+    .floorWith(2, [[-1, CELL.TALL], [1, CELL.TALL]])
+    .straight(3)
+    .floorWith(2, [[0, CELL.TALL], [-2, CELL.TALL], [2, CELL.TALL]])
+    .straight(3)
+    .coins([-1, 1])
+    .gap(2)
+    .bridge(6, -1, 2)
+    .floorWith(2, [[0, CELL.TALL]])
+    .bridge(3, -1, 2)
+    .straight(3)
+    .floorWith(4, [[-3, CELL.HAZARD], [-1, CELL.HAZARD], [1, CELL.HAZARD], [3, CELL.HAZARD]])
+    .straight(3)
+    .coins([0])
+    .floorWith(1, [[-1, CELL.AMMO]])
+    .straight(2)
+    .floorWith(1, [[0, CELL.DESTRUCTIBLE], [-1, CELL.DESTRUCTIBLE], [1, CELL.DESTRUCTIBLE]])
+    .straight(3)
+    .floorWith(1, [[-2, CELL.LOW], [-1, CELL.LOW], [0, CELL.LOW], [1, CELL.LOW], [2, CELL.LOW]])
+    .straight(3)
+    .raw(['======='])
+    .straight(3)
+    .floorWith(3, [[-1, CELL.DEBRIS], [0, CELL.DEBRIS], [1, CELL.DEBRIS]])
+    .straight(3)
+    .gap(3)
+    .straight(3)
+    .floorWith(2, [[-2, CELL.TALL], [0, CELL.TALL], [2, CELL.TALL]])
+    .straight(5)
+    .coins([0]).coins([0])
+    .straight(4)
+    .floorWith(3, [[-3, CELL.HAZARD], [-2, CELL.HAZARD], [2, CELL.HAZARD], [3, CELL.HAZARD]])
+    .floorWith(2, [[0, CELL.TALL]])
+    .straight(3)
+    .floorWith(1, [[-1, CELL.AMMO]])
+    .straight(2)
+    .floorWith(1, [[-1, CELL.DESTRUCTIBLE], [0, CELL.DESTRUCTIBLE], [1, CELL.DESTRUCTIBLE], [2, CELL.DESTRUCTIBLE]])
+    .straight(3)
+    .coins([0])
+    .floorWith(2, [[-2, CELL.TALL], [2, CELL.TALL]])
+    .straight(3)
+    .gap(2)
+    .straight(6)
+    .build();
+}
+
+function level9() {
+  // Speed level: boosts everywhere, generous but fast.
+  return b()
+    .straight(8)
+    .floorWith(1, [[0, CELL.BOOST]])
+    .straight(5)
+    .gap(3)
+    .straight(4)
+    .floorWith(1, [[-1, CELL.BOOST], [1, CELL.BOOST]])
+    .straight(4)
+    .gap(4)
+    .straight(4)
+    .coins([0])
+    .floorWith(1, [[0, CELL.BOOST]])
+    .bridge(6, -1, 1)
+    .straight(3)
+    .gap(3)
+    .straight(3)
+    .floorWith(1, [[0, CELL.LOW]])
+    .straight(3)
+    .floorWith(1, [[0, CELL.BOOST]])
+    .gap(4)
+    .straight(4)
+    .coins([-1, 0, 1])
+    .gap(2)
+    .bridge(4, 0, 2)
+    .straight(4)
+    .gap(2)
+    .straight(3)
+    .floorWith(1, [[0, CELL.BOOST]])
+    .straight(4)
+    .gap(4)
+    .straight(4)
+    .coins([0])
+    .floorWith(1, [[-1, CELL.BOOST], [1, CELL.BOOST]])
+    .gap(4)
+    .straight(4)
+    .gap(3)
+    .straight(3)
+    .floorWith(1, [[0, CELL.BOOST]])
+    .gap(4)
+    .straight(6)
+    .build();
+}
+
+function level10() {
+  // Graduation exam: everything combined.
+  return b()
+    .straight(8)
+    .floorWith(2, [[-1, CELL.TALL], [1, CELL.TALL]])
+    .straight(3)
+    .gap(3)
+    .bridge(5, -1, 1)
+    .floorWith(1, [[0, CELL.LOW]])
+    .bridge(3, -1, 1)
+    .straight(3)
+    .coins([0])
+    .floorWith(3, [[-3, CELL.HAZARD], [-2, CELL.HAZARD], [-1, CELL.HAZARD], [1, CELL.HAZARD], [2, CELL.HAZARD], [3, CELL.HAZARD]])
+    .straight(3)
+    .floorWith(1, [[0, CELL.BOOST]])
+    .straight(2)
+    .gap(5)
+    .straight(4)
+    .coins([-1, 1])
+    .floorWith(1, [[0, CELL.AMMO]])
+    .straight(3)
+    .raw(['DDD#DDD'])      // wall with only the center open
+    .straight(3)
+    .raw(['======='])
+    .straight(4)
+    .raw(['.......', '.......', '...O...', '.......'])
+    .straight(4)
+    .bridge(6, 1, 3)
+    .floorWith(2, [[2, CELL.TALL]])
+    .bridge(3, 1, 3)
+    .straight(3)
+    .gap(3)
+    .straight(3)
+    .floorWith(1, [[-2, CELL.LOW], [-1, CELL.LOW], [0, CELL.LOW], [1, CELL.LOW], [2, CELL.LOW]])
+    .straight(3)
+    .floorWith(1, [[0, CELL.BOOST]])
+    .gap(4)
+    .straight(4)
+    .coins([0]).coins([0])
+    .straight(4)
+    .floorWith(2, [[-1, CELL.TALL], [1, CELL.TALL]])
+    .straight(3)
+    .floorWith(1, [[0, CELL.AMMO]])
+    .straight(3)
+    .raw(['DDDD##D'])      // corridor on the right of center
+    .straight(3)
+    .floorWith(3, [[-3, CELL.HAZARD], [-2, CELL.HAZARD], [0, CELL.HAZARD], [2, CELL.HAZARD], [3, CELL.HAZARD]])
+    .straight(3)
+    .coins([-1, 1])
+    .floorWith(1, [[0, CELL.BOOST]])
+    .straight(2)
+    .gap(5)
+    .straight(4)
+    .gap(3)
+    .straight(8)
+    .build();
+}
+
+const HANDCRAFTED = [level1, level2, level3, level4, level5, level6, level7, level8, level9, level10];
+
+// ---------------------------------------------------------------------------
+// Seeded RNG (mulberry32) — deterministic generation per level index.
+// ---------------------------------------------------------------------------
+export function mulberry32(seed) {
+  let a = seed >>> 0;
+  return function () {
+    a |= 0; a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Level speed / jump reach model — shared by game, generator and solver.
+// ---------------------------------------------------------------------------
+export function levelSpeed(index) {
+  // index is 0-based. 6.5 tiles/s at level 1 -> capped 12.5.
+  return Math.min(12.5, 6.5 + index * 0.062);
+}
+
+// Two-tier jump reach model (shared by game intuition, generator and solver).
+// Tap jump: quick hop. Held jump: reduced gravity while rising -> higher/longer.
+// Both are conservative vs the real physics so "solvable" stays a proof.
+const TAP_AIR_S = (2 * PHYSICS.jumpVelocity) / PHYSICS.gravity;                    // ~0.58s
+const HOLD_APEX = (PHYSICS.jumpVelocity ** 2) / (2 * PHYSICS.holdGravity);         // ~1.18
+const HOLD_AIR_S = PHYSICS.jumpVelocity / PHYSICS.holdGravity +
+  Math.sqrt((2 * HOLD_APEX) / PHYSICS.gravity);                                    // ~0.89s
+
+export function tapGap(speed) {
+  return Math.max(1, Math.floor(speed * TAP_AIR_S) - 1);
+}
+export function holdGap(speed) {
+  return Math.max(3, Math.floor(speed * HOLD_AIR_S) - 1);
+}
+// legacy alias (endless track difficulty ramp)
+export function maxJumpGap(speed) { return holdGap(speed); }
+
+// ---------------------------------------------------------------------------
+// TrackBuilder — the pattern-emitter machinery shared by the campaign
+// generator (levels 11-100), the daily challenge and the endless mode.
+//
+// Strategy: walk a "path lane" down the track. For each chunk pick a pattern
+// and emit rows such that the path lane is always survivable with simple
+// moves (steer <=1 lane per 2 rows on the ground; gaps <= maxJumpGap; low
+// blocks always have >=2 rows of runway and >=2 rows of landing).
+// Decoration (side floor, towers, hazards, coins) never touches the path.
+//
+// IMPORTANT: campaign output must stay byte-identical across refactors —
+// tools/validate-levels.mjs pins a SHA256 of all 100 levels. Any change to
+// rng() call order here changes every generated level.
+// ---------------------------------------------------------------------------
+class TrackBuilder {
+  constructor(rng, difficulty, tapG, holdG, easy = false) {
+    this.rng = rng;
+    this.tapG = tapG;   // rows a tap jump safely clears
+    this.holdG = holdG; // rows a held jump safely clears
+    this.easy = easy;   // tutorial acts: steering + tap jumps only
+    this.rows = [];
+    this.path = 0; // current guaranteed-safe lane
+    this._lastFuelRow = 0; // the tank starts full, so row 0 counts as fueled
+    this.setDifficulty(difficulty);
+  }
+
+  setDifficulty(d) {
+    this.difficulty = d;
+    // Probability that a non-path cell has floor at all (thins out with difficulty)
+    this.sideFloorP = 0.9 - 0.35 * d;
+  }
+
+  open(n) { for (let i = 0; i < n; i++) this.rows.push(fullRow()); }
+  close(n) { this.open(n); }
+
+  decoratedRow(safeLanes, opts = {}) {
+    // safeLanes: Set of lanes that must be plain floor (or given char)
+    const r = emptyRow();
+    for (let lane = LANE_MIN; lane <= LANE_MAX; lane++) {
+      const i = lane + L;
+      if (safeLanes.has(lane)) { r[i] = opts.pathChar || CELL.FLOOR; continue; }
+      if (this.rng() < this.sideFloorP) {
+        const roll = this.rng();
+        // lanes touching the safe corridor stay clearer: breathing room
+        const k = safeLanes.has(lane - 1) || safeLanes.has(lane + 1) ? 0.5 : 1;
+        if (roll < (0.06 * this.difficulty + 0.02) * k) r[i] = CELL.TALL;
+        else if (roll < (0.12 * this.difficulty + 0.05) * k) r[i] = CELL.LOW;
+        else if (roll < (0.16 * this.difficulty + 0.06) * k) r[i] = CELL.HAZARD;
+        else r[i] = CELL.FLOOR;
+      }
+    }
+    return r;
+  }
+
+  safeSet(center, width) {
+    const s = new Set();
+    const half = Math.floor(width / 2);
+    let from = center - half, to = center + (width - 1 - half);
+    if (from < LANE_MIN) { to += LANE_MIN - from; from = LANE_MIN; }
+    if (to > LANE_MAX) { from -= to - LANE_MAX; to = LANE_MAX; }
+    for (let l = from; l <= to; l++) s.add(l);
+    return s;
+  }
+
+  // --- pattern emitters ------------------------------------------------
+  // blue supplies strip (SkyRoads): full-width refuel rows, flanked by
+  // plain floor so a landing on the strip is always safe
+  patSupplies() {
+    this.rows.push(fullRow());
+    this.rows.push(fullRow(CELL.FUEL));
+    this.rows.push(fullRow(CELL.FUEL));
+    this.rows.push(fullRow());
+    this._lastFuelRow = this.rows.length - 2;
+  }
+
+  patStraight(n) {
+    for (let i = 0; i < n; i++) {
+      const r = this.decoratedRow(this.safeSet(this.path, 3));
+      if (i === 1 && this.rng() < 0.22) r[this.path + L] = CELL.AMMO;
+      this.rows.push(r);
+    }
+  }
+
+  patMeander(n) {
+    let placed = 0;
+    while (placed < n) {
+      const dir = this.path <= LANE_MIN + 1 ? 1 : this.path >= LANE_MAX - 1 ? -1 : (this.rng() < 0.5 ? -1 : 1);
+      // 2 rows at current lane, then shift (<=1 lane per 2 rows keeps it easy)
+      this.rows.push(this.decoratedRow(this.safeSet(this.path, 3)));
+      this.rows.push(this.decoratedRow(this.safeSet(this.path, 3)));
+      this.path = Math.max(LANE_MIN, Math.min(LANE_MAX, this.path + dir));
+      placed += 2;
+    }
+  }
+
+  patGap() {
+    // narrow gaps are tap-able; wide gaps (more common as difficulty rises)
+    // demand a HELD jump — and often carry a ring at the top of the arc
+    const wide = this.rng() < 0.25 + 0.45 * this.difficulty && !this.easy;
+    const lo = wide ? this.tapG + 1 : 2;
+    const hi = wide ? this.holdG : Math.max(2, this.tapG);
+    const gap = Math.min(this.holdG, lo + Math.floor(this.rng() * Math.max(1, hi - lo + 1)));
+    // runway
+    for (let i = 0; i < 3; i++) this.rows.push(this.decoratedRow(this.safeSet(this.path, 3)));
+    // the gap: nothing anywhere (coin arc, or a ring mid-arc on wide gaps)
+    const coinArc = this.rng() < 0.5;
+    const ring = wide && this.rng() < 0.6;
+    for (let i = 0; i < gap; i++) {
+      const r = emptyRow();
+      if (ring && i === Math.floor(gap / 2)) r[this.path + L] = CELL.RING;
+      else if (coinArc) r[this.path + L] = CELL.COIN_AIR;
+      this.rows.push(r);
+    }
+    // landing
+    for (let i = 0; i < 3; i++) this.rows.push(this.decoratedRow(this.safeSet(this.path, 3)));
+  }
+
+  patHurdle() {
+    // energy fence across the safe zone: too tall for a tap -> HELD jump.
+    // The landing zone must cover the full hold-jump arc: at top speed a
+    // held jump flies holdG rows, so anything shorter can strand the arc
+    // in whatever pattern comes next.
+    for (let i = 0; i < 3; i++) this.rows.push(this.decoratedRow(this.safeSet(this.path, 3)));
+    this.rows.push(this.decoratedRow(this.safeSet(this.path, 3), { pathChar: CELL.HURDLE }));
+    const landing = Math.max(3, this.holdG + 1);
+    for (let i = 0; i < landing; i++) this.rows.push(this.decoratedRow(this.safeSet(this.path, 3)));
+    if (this.difficulty > 0.5 && this.rng() < 0.5) {
+      // hold-then-tap rhythm: a low block after the landing zone
+      this.rows.push(this.decoratedRow(this.safeSet(this.path, 3), { pathChar: CELL.LOW }));
+      for (let i = 0; i < 3; i++) this.rows.push(this.decoratedRow(this.safeSet(this.path, 3)));
+    }
+  }
+
+  patDebris() {
+    // floating wreckage over the corridor: drive or tap-hop UNDER it (no held jumps)
+    const len = 3 + Math.floor(this.rng() * (2 + 4 * this.difficulty));
+    for (let i = 0; i < len; i++) {
+      const r = this.decoratedRow(this.safeSet(this.path, 3));
+      for (const l of this.safeSet(this.path, 3)) r[l + L] = CELL.DEBRIS;
+      this.rows.push(r);
+    }
+    for (let i = 0; i < 2; i++) this.rows.push(this.decoratedRow(this.safeSet(this.path, 3)));
+    if (this.rng() < 0.35 + 0.3 * this.difficulty) {
+      // a tap-gap right out of the no-hold zone
+      const gap = Math.min(2, this.tapG);
+      for (let i = 0; i < gap; i++) this.rows.push(emptyRow());
+      for (let i = 0; i < 3; i++) this.rows.push(this.decoratedRow(this.safeSet(this.path, 3)));
+    }
+  }
+
+  patRingJump() {
+    // a wide, held-jump-only gap with a glowing ring at the top of the arc
+    const gap = Math.min(this.holdG, this.tapG + 1 + Math.floor(this.rng() * Math.max(1, this.holdG - this.tapG)));
+    for (let i = 0; i < 3; i++) this.rows.push(this.decoratedRow(this.safeSet(this.path, 3)));
+    for (let i = 0; i < gap; i++) {
+      const r = emptyRow();
+      if (i === Math.floor(gap / 2)) r[this.path + L] = CELL.RING;
+      else if (i % 2 === 0) r[this.path + L] = CELL.COIN_AIR;
+      this.rows.push(r);
+    }
+    for (let i = 0; i < 3; i++) this.rows.push(this.decoratedRow(this.safeSet(this.path, 3)));
+  }
+
+  patNarrowBridge() {
+    const len = 4 + Math.floor(this.rng() * (5 + 6 * this.difficulty));
+    const width = this.rng() < 0.3 + 0.4 * this.difficulty ? 2 : 3;
+    for (let i = 0; i < len; i++) {
+      const s = this.safeSet(this.path, width);
+      const r = emptyRow();
+      for (const l of s) r[l + L] = CELL.FLOOR;
+      if (i === Math.floor(len / 2)) r[this.path + L] = CELL.COIN;
+      this.rows.push(r);
+    }
+    for (let i = 0; i < 2; i++) this.rows.push(this.decoratedRow(this.safeSet(this.path, 3)));
+  }
+
+  patLowBlockJump() {
+    // runway, 1 row of low blocks across the safe zone, landing
+    for (let i = 0; i < 3; i++) this.rows.push(this.decoratedRow(this.safeSet(this.path, 3)));
+    const r = this.decoratedRow(this.safeSet(this.path, 3), { pathChar: CELL.LOW });
+    this.rows.push(r);
+    for (let i = 0; i < 3; i++) this.rows.push(this.decoratedRow(this.safeSet(this.path, 3)));
+  }
+
+  patSlalom() {
+    // tall blocks alternate on either side, 2 lanes off-path: the full
+    // 3-wide corridor stays clear so weaving never feels pinched
+    const n = 3 + Math.floor(this.rng() * 3);
+    for (let k = 0; k < n; k++) {
+      const side = k % 2 === 0 ? 2 : -2;
+      const blockLane = Math.max(LANE_MIN, Math.min(LANE_MAX, this.path + side));
+      for (let i = 0; i < 2; i++) {
+        const r = this.decoratedRow(this.safeSet(this.path, 3));
+        if (Math.abs(blockLane - this.path) === 2) r[blockLane + L] = CELL.TALL;
+        this.rows.push(r);
+      }
+      this.rows.push(this.decoratedRow(this.safeSet(this.path, 3)));
+    }
+  }
+
+  patHazardCorridor() {
+    const len = 3 + Math.floor(this.rng() * (3 + 4 * this.difficulty));
+    for (let i = 0; i < len; i++) {
+      const r = fullRow(CELL.HAZARD);
+      for (const l of this.safeSet(this.path, 3)) r[l + L] = CELL.FLOOR;
+      this.rows.push(r);
+    }
+    for (let i = 0; i < 2; i++) this.rows.push(this.decoratedRow(this.safeSet(this.path, 3)));
+  }
+
+  patBoost() {
+    const r = this.decoratedRow(this.safeSet(this.path, 3));
+    r[this.path + L] = CELL.BOOST;
+    this.rows.push(r);
+    // boosted: generous straight after
+    for (let i = 0; i < 8; i++) this.rows.push(this.decoratedRow(this.safeSet(this.path, 3)));
+  }
+
+  patBoostGap() {
+    // speed strip two tiles before a gap only a BOOSTED held jump clears —
+    // the SkyRoads way to cross big voids (replaces the old auto-bounce pad)
+    const r = this.decoratedRow(this.safeSet(this.path, 3));
+    for (const l of this.safeSet(this.path, 3)) r[l + L] = CELL.BOOST;
+    this.rows.push(r);
+    for (let i = 0; i < 2; i++) this.rows.push(this.decoratedRow(this.safeSet(this.path, 3)));
+    const gap = this.holdG + 1 + (this.rng() < 0.5 ? 0 : 1);
+    for (let i = 0; i < gap; i++) {
+      const g = emptyRow();
+      if (i % 2 === 0) g[this.path + L] = CELL.COIN_AIR;
+      this.rows.push(g);
+    }
+    const landing = Math.max(4, this.holdG + 3 - gap);
+    for (let i = 0; i < landing; i++) this.rows.push(this.decoratedRow(this.safeSet(this.path, 3)));
+  }
+
+  patDestructibleWall() {
+    // ammo on the path, then a barrier wall with a 2-lane open corridor at
+    // one edge; the guaranteed path meanders into the corridor first, so the
+    // wall is always avoidable without firing a shot.
+    const r0 = this.decoratedRow(this.safeSet(this.path, 3));
+    r0[this.path + L] = CELL.AMMO;
+    this.rows.push(r0);
+    const side = this.rng() < 0.5 ? -1 : 1;
+    const target = side < 0 ? LANE_MIN + 1 : LANE_MAX - 1; // inner corridor lane
+    while (this.path !== target) {
+      this.rows.push(this.decoratedRow(this.safeSet(this.path, 3)));
+      this.rows.push(this.decoratedRow(this.safeSet(this.path, 3)));
+      this.path += Math.sign(target - this.path);
+    }
+    for (let i = 0; i < 2; i++) this.rows.push(this.decoratedRow(this.safeSet(this.path, 3)));
+    // the wall: destructible everywhere except the 2-lane edge corridor
+    const wall = fullRow(CELL.DESTRUCTIBLE);
+    const open1 = side < 0 ? LANE_MIN : LANE_MAX;
+    const open2 = target;
+    wall[open1 + L] = CELL.FLOOR;
+    wall[open2 + L] = CELL.FLOOR;
+    this.rows.push(wall);
+    for (let i = 0; i < 3; i++) this.rows.push(this.decoratedRow(this.safeSet(this.path, 3)));
+  }
+
+  patCoinRun() {
+    for (let i = 0; i < 5; i++) {
+      const r = this.decoratedRow(this.safeSet(this.path, 3));
+      r[this.path + L] = CELL.COIN;
+      this.rows.push(r);
+    }
+  }
+
+  // weighted pattern table; harder patterns gain weight with difficulty.
+  // ORDER AND WEIGHTS ARE PART OF THE CAMPAIGN'S PINNED OUTPUT — do not reorder.
+  // Easy acts (early tutorial levels) only draw from the gentle patterns:
+  // steering, narrow gaps and tap-jumps — no held-jump mechanics yet.
+  patternTable() {
+    const gentle = [
+      [() => this.patStraight(6), 1.0],
+      [() => this.patMeander(8), 1.2],
+      [() => this.patGap(), 1.0 + this.difficulty],
+      [() => this.patNarrowBridge(), 0.6 + this.difficulty],
+      [() => this.patLowBlockJump(), 0.8 + this.difficulty * 0.7],
+      [() => this.patSlalom(), 0.7 + this.difficulty * 0.8],
+      [() => this.patBoost(), 0.5],
+      [() => this.patCoinRun(), 0.7],
+    ];
+    if (this.easy) return gentle;
+    return gentle.concat([
+      [() => this.patHazardCorridor(), 0.4 + this.difficulty],
+      [() => this.patBoostGap(), 0.5 + this.difficulty * 0.4],
+      [() => this.patDestructibleWall(), 0.5 + this.difficulty * 0.6],
+      [() => this.patHurdle(), 0.4 + this.difficulty * 0.9],
+      [() => this.patDebris(), 0.3 + this.difficulty * 0.9],
+      [() => this.patRingJump(), 0.3 + this.difficulty * 0.6],
+    ]);
+  }
+
+  emitOne() {
+    // guarantee refuel opportunities more often than the tank runs dry
+    if (this.rows.length - this._lastFuelRow >= FUEL.stripInterval) {
+      this.patSupplies();
+      return;
+    }
+    const patterns = this.patternTable();
+    const totalW = patterns.reduce((s, [, w]) => s + w, 0);
+    let roll = this.rng() * totalW;
+    for (const [fn, w] of patterns) {
+      roll -= w;
+      if (roll <= 0) { fn(); break; }
+    }
+  }
+
+  takeRows() { return this.rows.map((r) => r.join('')); }
+}
+
+// ---------------------------------------------------------------------------
+// Campaign generator (pinned output — see TrackBuilder note).
+//
+// One "act" is a self-contained original-length track design: full-floor
+// opening, patterns, full-floor close. A level stitches three acts with
+// DIFFERENT seeds — three distinct designs back to back — with difficulty
+// nudged upward each act so the run escalates like a three-part journey.
+// ---------------------------------------------------------------------------
+function generateAct(seed, difficulty, speed, targetRows, easy = false) {
+  const rng = mulberry32(seed >>> 0);
+  const tb = new TrackBuilder(rng, difficulty, tapGap(speed), holdGap(speed), easy);
+  tb.open(8);
+  tb.patSupplies();
+  while (tb.rows.length < targetRows) tb.emitOne();
+  tb.close(6);
+  return tb.takeRows();
+}
+
+function generateLevel(index) {
+  const speed = levelSpeed(index);
+  const dBase = Math.min(1, (index - 9) / 240); // 0 at lvl 10, 1 at ~lvl 250
+  // per-act length (~160 rows early, ~500 late)
+  const actRows = Math.round(160 + 340 * Math.min(1, (index - 9) / 300));
+  const acts = [];
+  for (let a = 0; a < 3; a++) {
+    const seed = (0xA11CE + index * 7919 + a * 0x3779B9) >>> 0;
+    const d = Math.min(1, dBase + a * 0.07); // act II and III bite harder
+    acts.push(generateAct(seed, d, speed, actRows));
+  }
+  return acts[0].concat(acts[1], acts[2]);
+}
+
+// Handcrafted levels: the authored design is act one; two gentle generated
+// acts follow. The first few levels only draw from tutorial-safe patterns.
+function handcraftedLevel(index) {
+  const speed = levelSpeed(index);
+  const easy = index < 5; // held-jump/hurdle/debris mechanics arrive from L6 acts
+  const actRows = 90 + index * 8;
+  const acts = [HANDCRAFTED[index]()];
+  for (let a = 0; a < 2; a++) {
+    const seed = (0xC4AF7 + index * 7919 + a * 0x3779B9) >>> 0;
+    const d = Math.min(0.35, 0.04 + index * 0.03 + a * 0.05);
+    acts.push(generateAct(seed, d, speed, actRows, easy));
+  }
+  return acts[0].concat(acts[1], acts[2]);
+}
+
+// ---------------------------------------------------------------------------
+// Daily challenge — the date IS the seed, so everyone on Earth gets the same
+// track each day with no server. dayKey: 'YYYY-MM-DD' (local date).
+// ---------------------------------------------------------------------------
+export function getDailyLevel(dayKey) {
+  const n = Number(dayKey.replace(/-/g, ''));
+  const rng = mulberry32((0xDA117E ^ Math.imul(n, 2654435761)) >>> 0);
+  const difficulty = 0.35 + rng() * 0.3;
+  const speed = 8 + difficulty * 3;
+  const tb = new TrackBuilder(rng, difficulty, tapGap(speed), holdGap(speed));
+  tb.open(8);
+  // three acts of original design length, each act a notch harder
+  for (let act = 0; act < 3; act++) {
+    tb.setDifficulty(Math.min(1, difficulty + act * 0.12));
+    const target = tb.rows.length + 210 + Math.floor(rng() * 60);
+    while (tb.rows.length < target) tb.emitOne();
+    if (act < 2) tb.open(10); // full-floor breather between acts
+  }
+  tb.close(6);
+  const rows = tb.takeRows();
+  return {
+    index: `daily-${dayKey}`,
+    daily: true,
+    dayKey,
+    name: "TODAY'S RUN",
+    speed,
+    theme: { ...THEMES[n % THEMES.length], glow: '#ffd24a', star: '#ffe9a0' },
+    rows,
+    length: rows.length,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Endless mode ("Hyperdrive") — the track streams forever. ensureRows(upTo)
+// appends chunks lazily; difficulty and speed ramp with distance.
+// ---------------------------------------------------------------------------
+export function createEndlessTrack(seed) {
+  const rng = mulberry32((0xE7D1E5 ^ Math.floor(seed)) >>> 0);
+  const tb = new TrackBuilder(rng, 0, tapGap(ENDLESS.baseSpeed), holdGap(ENDLESS.baseSpeed));
+  tb.open(8);
+  const rows = [];
+  const flush = () => {
+    while (rows.length < tb.rows.length) rows.push(tb.rows[rows.length].join(''));
+  };
+  flush();
+  const track = {
+    index: 'endless',
+    endless: true,
+    seed,
+    name: 'HYPERDRIVE',
+    theme: THEMES[Math.abs(Math.floor(seed)) % THEMES.length],
+    rows,
+    length: Infinity,
+    speed: ENDLESS.baseSpeed, // fallback; the game uses speedAt(z)
+    speedAt(z) {
+      return Math.min(ENDLESS.maxSpeed,
+        ENDLESS.baseSpeed + (z / ENDLESS.rampDistance) * (ENDLESS.maxSpeed - ENDLESS.baseSpeed));
+    },
+    ensureRows(upTo) {
+      while (rows.length < upTo) {
+        tb.setDifficulty(Math.min(1, rows.length / ENDLESS.rampDistance));
+        tb.tapG = tapGap(track.speedAt(rows.length));
+        tb.holdG = holdGap(track.speedAt(rows.length));
+        tb.emitOne();
+        flush();
+      }
+    },
+  };
+  return track;
+}
+
+// ---------------------------------------------------------------------------
+// Public API
+// ---------------------------------------------------------------------------
+const cache = new Map();
+
+export function getLevel(index) {
+  // index: 0-based
+  if (cache.has(index)) return cache.get(index);
+  const rows = index < 10 ? handcraftedLevel(index) : generateLevel(index);
+  const level = {
+    index,
+    name: `Level ${index + 1}`,
+    speed: levelSpeed(index),
+    theme: THEMES[index % THEMES.length],
+    rows,
+    length: rows.length,
+  };
+  cache.set(index, level);
+  return level;
+}
+
+// ---------------------------------------------------------------------------
+// Solver / validator — coarse BFS proving a level is completable.
+//
+// State: (row, lane, airRows) where airRows > 0 means we're mid-jump and land
+// after airRows more rows. Movement model (deliberately weaker than the real
+// physics, so "solvable here" implies "solvable in game"):
+//   - on ground: may stay or move +-1 lane every 2 rows (tracked via parity)
+//   - jump from ground: becomes airborne for `jumpRows` rows, may drift +-1
+//     lane total during the whole jump
+//   - landing cell must be floor-like; tall blocks kill unless jumped from
+//     afar (we simply never allow entering a TALL cell); hazard kills on
+//     ground contact; low blocks kill on ground contact but are cleared while
+//     airborne; empty cells kill on ground contact.
+// ---------------------------------------------------------------------------
+export function validateLevel(level) {
+  const { rows, speed } = level;
+  const n = rows.length;
+  // Two jump kinds: 0 = tap (short hop), 1 = held (high/long), 2 = bounce pad.
+  const tapRows = Math.max(1, tapGap(speed));
+  const holdRows = Math.max(3, holdGap(speed));
+  const padRows = holdRows + 2;
+  // Boost pads raise speed 1.55x for 1.6s (~15+ rows in game); model it as a
+  // conservative 12-row counter that lengthens jumps by 2 rows while active.
+  const BOOST_ROWS = 12;
+  const maxAir = padRows + 3;
+
+  const groundOK = (ch) =>
+    ch === CELL.FLOOR || ch === CELL.BOOST || ch === CELL.PAD ||
+    ch === CELL.COIN || ch === CELL.AMMO || ch === CELL.FUEL ||
+    ch === CELL.DEBRIS; // floor under wreckage
+  // destructibles count as walls here: levels must be completable with zero shots.
+  // Air legality depends on the jump kind:
+  //   hurdle '=' (0.9): too high for a tap, cleared by held/pad arcs
+  //   debris '~' (band 0.95-1.5): a tap slips under; held/pad arcs rise into it
+  const airOK = (ch, kind) => {
+    if (ch === CELL.TALL || ch === CELL.DESTRUCTIBLE) return false;
+    if (ch === CELL.HURDLE) return kind !== 0;
+    if (ch === CELL.DEBRIS) return kind === 0;
+    return true;
+  };
+
+  const seen = new Set();
+  const key = (row, lane, air, kind, par, boost) =>
+    ((((row * 7 + (lane + 3)) * (maxAir + 1) + air) * 3 + kind) * 2 + par) * (BOOST_ROWS + 1) + boost;
+
+  const queue = [];
+  for (let lane = -3; lane <= 3; lane++) {
+    if (groundOK(rows[0][lane + 3])) {
+      const s = [0, lane, 0, 0, 0, 0];
+      seen.add(key(...s));
+      queue.push(s);
+    }
+  }
+
+  while (queue.length) {
+    const [row, lane, air, kind, par, boost] = queue.shift();
+    if (row >= n - 1) return true;
+    const nextRow = row + 1;
+
+    const tryPush = (r, l, a, kd, p) => {
+      if (l < -3 || l > 3 || r >= n) return;
+      const ch = rows[r][l + 3];
+      if (a > 0) { if (!airOK(ch, kd)) return; }
+      else if (!groundOK(ch)) return;
+      const b = a === 0 && ch === CELL.BOOST ? BOOST_ROWS : Math.max(0, boost - 1);
+      const k = key(r, l, a, kd, p, b);
+      if (seen.has(k)) return;
+      seen.add(k);
+      queue.push([r, l, a, kd, p, b]);
+    };
+
+    if (air > 0) {
+      // airborne: continue forward; drift allowed only once (encoded in parity bit)
+      const landing = air === 1;
+      const nextAir = landing ? 0 : air - 1;
+      if (landing) {
+        tryPush(nextRow, lane, 0, 0, 0);
+        if (par === 0) { // landing drift +-1 if the mid-air drift wasn't spent
+          tryPush(nextRow, lane - 1, 0, 0, 0);
+          tryPush(nextRow, lane + 1, 0, 0, 0);
+        }
+      } else {
+        tryPush(nextRow, lane, nextAir, kind, par);
+        if (par === 0) { // spend the one allowed drift
+          tryPush(nextRow, lane - 1, nextAir, kind, 1);
+          tryPush(nextRow, lane + 1, nextAir, kind, 1);
+        }
+      }
+    } else {
+      // grounded: forward same lane
+      tryPush(nextRow, lane, 0, 0, 0);
+      // steer: 1 lane per 2 rows -> only when parity allows
+      if (par === 0) {
+        tryPush(nextRow, lane - 1, 0, 0, 1);
+        tryPush(nextRow, lane + 1, 0, 0, 1);
+      } else {
+        tryPush(nextRow, lane, 0, 0, 0);
+      }
+      // jumps: tap or held (longer while boosted); bounce pads fling highest
+      const ch = rows[row][lane + 3];
+      const boosted = boost > 0 || ch === CELL.BOOST ? 2 : 0;
+      if (ch === CELL.PAD) {
+        tryPush(nextRow, lane, padRows, 2, 0);
+      } else {
+        tryPush(nextRow, lane, tapRows + boosted, 0, 0);
+        tryPush(nextRow, lane, holdRows + boosted, 1, 0);
+      }
+    }
+  }
+  return false;
+}
